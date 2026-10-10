@@ -83,7 +83,12 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
     setBusy(label); setError(''); setNotice(''); setProgress([{ label, detail: '正在连接服务，请稍候' }]);
     try { await operation(task); }
     catch (cause) {
-      if (!task.signal.aborted && taskRef.current === task) setError(cause instanceof Error ? cause.message : '生成失败，请重试。');
+      if (!task.signal.aborted && taskRef.current === task) {
+        // 服务端附带的具体原因（如模型输出未通过校验的条目）一并展示，便于判断是重试还是改选择。
+        const details = (cause as { details?: unknown })?.details;
+        const suffix = Array.isArray(details) && details.length ? `（${details.filter(item => typeof item === 'string').slice(0, 4).join('；')}）` : '';
+        setError((cause instanceof Error ? cause.message : '生成失败，请重试。') + suffix);
+      }
     } finally {
       if (taskRef.current === task) { taskRef.current = null; setBusy(null); }
     }

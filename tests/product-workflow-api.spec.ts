@@ -155,6 +155,27 @@ test('重画按信息充分性追问，不限制轮数，已足够时直接返�
   }
   expect(round).toBe(7);
 });
+test('重画回复缺字段或新增特征 id 不合规时自动补齐；格式错误先让模型修正一次，仍错才返回具体原因', async () => {
+  const lenient = createProductWorkflowService(productConfig, async () => jsonEnvelope({ status: 'ready', summary: '新增快拆压板', intent: '新增快拆压板',
+    changes: { replacements: [], additions: [{ id: 'feature-1', text: '压板改为手拧旋钮快拆结构。' }] } }));
+  const result = await lenient(PRODUCT_PATHS.revise, { brief: makeBrief(), input: { text: '改成快拆压板', directions: [], answers: [] } }, signal()) as RevisionResponse;
+  expect(result.status).toBe('ready');
+  if (result.status === 'ready') {
+    expect(result.selection.visualPreferences).toBe('');
+    const added = result.selection.choices.at(-1)!;
+    expect(added.id).toMatch(/^rev-/); expect(added.category).toBe('结构特征'); expect(result.selection.choices.filter(choice => choice.id === 'feature-1')).toHaveLength(1);
+  }
+  const prompts: string[] = [];
+  const repaired = createProductWorkflowService(productConfig, async (_url, init) => {
+    const body = JSON.parse(String(init?.body)); prompts.push(body.messages[0].content);
+    return jsonEnvelope(prompts.length === 1 ? { status: 'ready', summary: '', intent: '', changes: { removeIds: ['nope'] } }
+      : { status: 'ready', summary: '只改颜色', intent: '只改颜色', changes: { removeIds: [], replacements: [], additions: [] }, visualPreferences: '蓝色' });
+  });
+  const fixed = await repaired(PRODUCT_PATHS.revise, { brief: makeBrief(), input: { text: '改蓝色', directions: [], answers: [] } }, signal()) as RevisionResponse;
+  expect(fixed.status).toBe('ready'); expect(prompts).toHaveLength(2); expect(prompts[1]).toContain('summary 必须'); expect(prompts[1]).toContain('只能引用现有 choice id');
+  const stubborn = createProductWorkflowService(productConfig, async () => jsonEnvelope({ status: 'ready', summary: 'x', intent: 'x', changes: { removeIds: ['nope'] } }));
+  await expect(stubborn(PRODUCT_PATHS.revise, { brief: makeBrief(), input: { text: '改', directions: [], answers: [] } }, signal())).rejects.toMatchObject({ code: 'AI_INVALID_OUTPUT', details: [expect.stringContaining('choice id')] });
+});
 test('生图异常不假装成功、不自动重试、上游错误不泄露密钥', async () => {
   let calls = 0;
   await expect(generateProductImage(makeBrief(), 'preview', 'color-hero', productConfig, signal(), async () => { calls++; return new Response('private provider message with image-test-secret', { status: 401 }); })).rejects.toMatchObject({ code: 'IMAGE_AUTH' });

@@ -55,19 +55,23 @@ export const PRODUCT_MATERIALS_PROMPT = `你是专利申请材料初稿撰写助
 权利要求从1连续编号，每条前置1.等数字编号；从属权利要求只能引用前面的权利要求。不照抄简介中的创作指令，不出现待补充占位文字。说明书正文必须完整而非目录。附图清单只有一张时绝不能引用图2、图3。只能使用简介中真实存在的部件数字标号。`;
 
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-async function productJson<T>(prompt: string, input: unknown, config: AiConfig, signal: AbortSignal, fetcher: typeof fetch, accept: (value: unknown) => value is T, progress?: ProgressReporter, maxTokens = 9000): Promise<T> {
+async function productJson<T>(prompt: string, input: unknown, config: AiConfig, signal: AbortSignal, fetcher: typeof fetch, accept: (value: unknown) => value is T, progress?: ProgressReporter, maxTokens = 9000, explain?: (value: unknown) => string[]): Promise<T> {
   // 文本生成总预算 600 秒。单次尝试上限按模型数均分（3 个模型时每个 190 秒）；
   // 之前的 210 秒均分后每个模型只有 66.5 秒，简介和申请文案这类长输出经常在此超时。
   // 前端 ProductWorkflowWorkspace.tsx 的等待时间（660 秒）必须长于这里。
   const timeoutMs = config.timeoutMs ?? 600000;
   const timeout = AbortSignal.timeout(timeoutMs);
   try {
-    const result = await chatJson(prompt, input, config, AbortSignal.any([signal, timeout]), fetcher, maxTokens, undefined, accept,
-      { attemptTimeoutMs: Math.max(1, Math.floor(timeoutMs * .95 / Math.max(1, generationProviders(config).length))), onProgress: progress });
+    // 校验不通过时把具体原因回给模型修正一次，而不是直接整体失败；最终仍不通过时把原因一并返回前端。
+    const result = await chatJson(prompt, input, config, AbortSignal.any([signal, timeout]), fetcher, maxTokens, undefined,
+      value => accept(value) ? true : (explain?.(value) ?? ['返回的 JSON 不符合要求的结构。']),
+      { attemptTimeoutMs: Math.max(1, Math.floor(timeoutMs * .95 / Math.max(1, generationProviders(config).length))), onProgress: progress,
+        validationRetry: { maxTokens, prompt: details => `${prompt}\n上一轮输出未通过校验，请只输出修正后的完整纯 JSON，逐项修复以下问题：\n- ${details.join('\n- ')}` } });
     return result.value as T;
   } catch (error) {
     if (signal.aborted) throw new AiFailure(499, 'AI_CANCELLED', '已取消本次生成，已有成果仍保留。');
     if (timeout.aborted || (error instanceof AiFailure && error.code === 'AI_ATTEMPT_TIMEOUT')) throw new AiFailure(504, 'AI_TIMEOUT', '产品文本生成超时，请稍后重试。');
+    if (error instanceof AiFailure && error.code === 'AI_INVALID_OUTPUT') throw new AiFailure(502, 'AI_INVALID_OUTPUT', '模型两次返回的内容都没有通过格式校验，未采用该结果；请重试。', error.details);
     if (error instanceof AiFailure) throw error;
     throw new AiFailure(502, 'AI_NETWORK', '文本模型连接失败，请稍后重试。');
   }
@@ -86,7 +90,53 @@ function requireConfirmed(body: Record<string, unknown>, config: AiConfig): { br
 }
 type RevisionDecision = { status: 'needs_information'; summary: string; intent: string; questions: RevisionQuestion[] } |
   { status: 'ready'; summary: string; intent: string; changes: ChoiceChanges & { additions: ProductChoice[] }; visualPreferences: string };
+/** 先把模型常见的小偏差补齐（缺字段、新增特征的 id 不合规），再做严格校验；原地修改以便 chatJson 直接采用。 */
+function normalizeRevisionDecision(value: unknown, selection: ProductSelection): void {
+  if (!object(value)) return;
+  if (value.status === 'ready') {
+    if (typeof value.visualPreferences !== 'string') value.visualPreferences = '';
+    if (!object(value.changes)) value.changes = {};
+    const changes = value.changes as Record<string, unknown>;
+    if (!Array.isArray(changes.removeIds)) changes.removeIds = [];
+    if (!Array.isArray(changes.replacements)) changes.replacements = [];
+    if (!Array.isArray(changes.additions)) changes.additions = [];
+    if (changes.proposedName === null || changes.proposedName === '') delete changes.proposedName;
+    const used = new Set(selection.choices.map(choice => choice.id));
+    let counter = 0;
+    for (const item of changes.additions as unknown[]) {
+      if (!object(item)) continue;
+      if (typeof item.category !== 'string' || !item.category.trim()) item.category = '结构特征';
+      if (typeof item.id !== 'string' || !/^rev-[a-zA-Z0-9_-]+$/.test(item.id) || used.has(item.id)) {
+        do { counter += 1; item.id = `rev-${Date.now().toString(36)}-${counter}`; } while (used.has(item.id as string));
+      }
+      used.add(item.id as string);
+    }
+  }
+  if (value.status === 'needs_information' && Array.isArray(value.questions)) {
+    for (const [index, question] of (value.questions as unknown[]).entries()) {
+      if (!object(question)) continue;
+      if (typeof question.id !== 'string' || !question.id.trim()) question.id = `question-${index + 1}`;
+      if (Array.isArray(question.options)) question.options = [...new Set((question.options as unknown[]).filter(option => typeof option === 'string' && option.trim()))];
+    }
+  }
+}
+function revisionDecisionErrors(value: unknown, selection: ProductSelection): string[] {
+  if (!object(value)) return ['必须返回一个 JSON 对象。'];
+  const errors: string[] = [];
+  if (!productText(value.summary, 3000)) errors.push('summary 必须是 3000 字以内的非空文字。');
+  if (!productText(value.intent, 12000)) errors.push('intent 必须是 12000 字以内的非空文字。');
+  if (value.status === 'needs_information') {
+    if (!isRevisionQuestions(value.questions)) errors.push('questions 必须是 1 至 4 个问题，每个含唯一 id、question 和 2 至 6 个不重复的 options。');
+  } else if (value.status === 'ready') {
+    if (!isChoiceChanges(value.changes, selection)) errors.push('changes.removeIds 与 replacements 只能引用现有 choice id，replacements 要有完整 text，proposedName 为非空字符串或省略。');
+    const additions = (value.changes as { additions?: unknown } | undefined)?.additions;
+    if (!Array.isArray(additions) || additions.length > 15 || !additions.every(item => object(item) && productText(item.category, 80) && productText(item.text, 3000))) errors.push('changes.additions 至多 15 项，每项需有 category 和完整 text。');
+    if (!productText(value.visualPreferences, 6000, true)) errors.push('visualPreferences 必须是 6000 字以内的字符串，可为空。');
+  } else errors.push('status 只能是 needs_information 或 ready。');
+  return errors;
+}
 function isRevisionDecision(value: unknown, selection: ProductSelection): value is RevisionDecision {
+  normalizeRevisionDecision(value, selection);
   if (!object(value) || !productText(value.summary, 3000) || !productText(value.intent, 12000)) return false;
   if (value.status === 'needs_information') return isRevisionQuestions(value.questions);
   if (value.status !== 'ready' || !isChoiceChanges(value.changes, selection) || !productText(value.visualPreferences, 6000, true)) return false;
@@ -256,7 +306,7 @@ export function createProductWorkflowService(config: AiConfig, fetcher: typeof f
       if (isRevisionDialogue(body.dialogue) && body.dialogue.questions.some(question => !(input as RevisionInput).answers.some(answer => answer.questionId === question.id && answer.text.trim()))) throw new AiFailure(400, 'PRODUCT_REVISION_ANSWERS', '请回答本轮需要明确的问题，也可以填写自己的答案。');
       progress?.('理解重画意见', '只在影响完整产品的关键条件不明确时追问，没有固定轮数限制');
       const decision = await productJson<RevisionDecision>(PRODUCT_REVISION_PROMPT, { brief: { selection: brief.selection, introduction: brief.description },
-        previousDialogue: body.dialogue, input }, config, signal, fetcher, (value): value is RevisionDecision => isRevisionDecision(value, brief.selection), progress);
+        previousDialogue: body.dialogue, input }, config, signal, fetcher, (value): value is RevisionDecision => isRevisionDecision(value, brief.selection), progress, 9000, value => revisionDecisionErrors(value, brief.selection));
       if (decision.status === 'needs_information') return { status: 'needs_information', dialogue: signProductArtifact('revision', {
         briefId: brief.id, intent: decision.intent, summary: decision.summary, questions: decision.questions,
       }, config) } satisfies RevisionResponse;
