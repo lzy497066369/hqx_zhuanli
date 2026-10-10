@@ -212,30 +212,32 @@ export function renderMeshView(mesh: Mesh, options: ProjectionOptions): Projecti
     const ty = dy > 1e-9 ? (fy1 - anchor[1]) / dy : dy < -1e-9 ? (fy0 - anchor[1]) / dy : Infinity;
     return Math.max(0, Math.min(tx, ty));
   };
+  /** 某个方向的引出线代价：越长、越穿过其他部件、越和已有标号挤在一起，代价越高。 */
+  const directionCost = (anchor: [number, number], dx: number, dy: number, own: number) => {
+    const reach = exitDistance(anchor, dx, dy) + margin * .45;
+    const lx = anchor[0] + dx * reach, ly = anchor[1] + dy * reach;
+    const crowding = placed.reduce((sum, point) => sum + Math.max(0, fontSize * 3 - Math.hypot(point[0] - lx, point[1] - ly)), 0);
+    const outside = lx < fontSize || ly < fontSize || lx > width - fontSize || ly > height - fontSize ? width : 0;
+    let crossing = 0;
+    const samples = Math.max(8, Math.min(80, Math.round(reach / 6)));
+    for (let index = 1; index <= samples; index++) {
+      const sx = Math.floor(anchor[0] + dx * reach * index / samples), sy = Math.floor(anchor[1] + dy * reach * index / samples);
+      if (sx < 0 || sy < 0 || sx >= width || sy >= height) continue;
+      const at = sy * width + sx;
+      if (!Number.isFinite(depth[at])) continue;
+      if (!owner || owner[at] !== own) crossing += 1;
+    }
+    return reach + crowding * 2 + outside + crossing * (reach / samples) * 3;
+  };
+  const DIRECTIONS: [number, number][] = Array.from({ length: 8 }, (_, step) => [Math.cos(step * Math.PI / 4), Math.sin(step * Math.PI / 4)]);
   /** 在 8 个方向里选引出线最短、尽量不穿过其他部件、且不和已有标号挤在一起的一侧，数字落在轮廓外侧留白处。 */
   const chooseDirection = (anchor: [number, number], own = 0): [number, number] => {
-    let best: { dx: number; dy: number; cost: number } | undefined;
-    for (let step = 0; step < 8; step++) {
-      const angle = step * Math.PI / 4;
-      const dx = Math.cos(angle), dy = Math.sin(angle);
-      const reach = exitDistance(anchor, dx, dy) + margin * .45;
-      const lx = anchor[0] + dx * reach, ly = anchor[1] + dy * reach;
-      const crowding = placed.reduce((sum, point) => sum + Math.max(0, fontSize * 3 - Math.hypot(point[0] - lx, point[1] - ly)), 0);
-      const outside = lx < fontSize || ly < fontSize || lx > width - fontSize || ly > height - fontSize ? width : 0;
-      // 沿引出线采样：落在其他部件（或非本部件的任何实体）上的像素越多，越不该从这边引出。
-      let crossing = 0;
-      const samples = Math.max(8, Math.min(80, Math.round(reach / 6)));
-      for (let index = 1; index <= samples; index++) {
-        const sx = Math.floor(anchor[0] + dx * reach * index / samples), sy = Math.floor(anchor[1] + dy * reach * index / samples);
-        if (sx < 0 || sy < 0 || sx >= width || sy >= height) continue;
-        const at = sy * width + sx;
-        if (!Number.isFinite(depth[at])) continue;
-        if (!owner || owner[at] !== own) crossing += 1;
-      }
-      const cost = reach + crowding * 2 + outside + crossing * (reach / samples) * 3;
-      if (!best || cost < best.cost) best = { dx, dy, cost };
+    let best: { direction: [number, number]; cost: number } | undefined;
+    for (const direction of DIRECTIONS) {
+      const cost = directionCost(anchor, direction[0], direction[1], own);
+      if (!best || cost < best.cost) best = { direction, cost };
     }
-    return [best!.dx, best!.dy];
+    return best!.direction;
   };
   const place = (text: string, anchor: [number, number], direction?: [number, number], own = 0) => {
     const [dx, dy] = direction ?? chooseDirection(anchor, own);
@@ -265,39 +267,53 @@ export function renderMeshView(mesh: Mesh, options: ProjectionOptions): Projecti
     labelCount += 1;
   }
   if (options.partLabels && owner) {
-    // 每个部件在本视角的可见像素：取可见区域质心附近最近的可见像素作为引出线落点，可见面积太小的部件不标。
-    const sums = partIds.map(() => ({ x: 0, y: 0, count: 0 }));
+    // 每个部件在 8 个方向上最靠外的可见像素：引出线从部件外侧边缘出发，短而直接，尽量不穿过别的部件。
+    const counts = partIds.map(() => 0);
+    const extremes = partIds.map(() => DIRECTIONS.map(() => ({ x: 0, y: 0, score: -Infinity })));
     for (let at = 0; at < owner.length; at++) {
       const id = owner[at];
       if (!id) continue;
-      const stat = sums[id - 1];
-      stat.x += at % width; stat.y += Math.floor(at / width); stat.count += 1;
-    }
-    const anchors = partIds.map(() => ({ x: 0, y: 0, distance: Infinity }));
-    for (let at = 0; at < owner.length; at++) {
-      const id = owner[at];
-      if (!id) continue;
-      const stat = sums[id - 1];
-      const cx = stat.x / stat.count, cy = stat.y / stat.count;
       const x = at % width, y = Math.floor(at / width);
-      const distance = Math.hypot(x - cx, y - cy);
-      if (distance < anchors[id - 1].distance) anchors[id - 1] = { x, y, distance };
+      counts[id - 1] += 1;
+      const slots = extremes[id - 1];
+      for (const [index, [dx, dy]] of DIRECTIONS.entries()) {
+        const score = x * dx + y * dy;
+        if (score > slots[index].score) slots[index] = { x, y, score };
+      }
     }
     const minimumArea = fontSize * fontSize * .6;
     for (const [index, id] of partIds.entries()) {
-      if (sums[index].count < minimumArea) continue;
-      place(id, [anchors[index].x + .5, anchors[index].y + .5], undefined, index + 1);
+      if (counts[index] < minimumArea) continue;
+      let best: { anchor: [number, number]; direction: [number, number]; cost: number } | undefined;
+      for (const [slot, direction] of DIRECTIONS.entries()) {
+        const extreme = extremes[index][slot];
+        // 落点从边缘往部件内收 2 像素，保证线头落在部件上而不是悬在轮廓外。
+        const anchor: [number, number] = [extreme.x + .5 - direction[0] * 2, extreme.y + .5 - direction[1] * 2];
+        const cost = directionCost(anchor, direction[0], direction[1], index + 1);
+        if (!best || cost < best.cost) best = { anchor, direction, cost };
+      }
+      place(id, best!.anchor, best!.direction, index + 1);
       labelCount += 1; labelledParts.push(id);
     }
   }
   if (options.keyCircle) {
     const centre = toPixel(project(options.keyCircle.point));
-    const radius = Math.max(fontSize, options.keyCircle.radius * scale);
-    const f = (value: number) => (Math.round(value * 10) / 10).toFixed(1);
-    annotations.push(`<circle cx="${f(centre[0])}" cy="${f(centre[1])}" r="${f(radius)}"/>`);
-    const [dx, dy] = chooseDirection(centre);
-    place('A', [centre[0] + dx * radius, centre[1] + dy * radius], [dx, dy]);
-    labelCount += 1;
+    const radius = Math.max(fontSize * 1.4, options.keyCircle.radius * scale);
+    // 圈内必须真的有结构：按圆内采样，实体像素不足两成就不画圈，避免圈住空白或图外。
+    let inside = 0, total = 0;
+    for (let ring = 0; ring < 6; ring++) for (let step = 0; step < 12; step++) {
+      const rr = radius * (ring + .5) / 6, angle = step * Math.PI / 6;
+      const sx = Math.floor(centre[0] + Math.cos(angle) * rr), sy = Math.floor(centre[1] + Math.sin(angle) * rr);
+      total += 1;
+      if (sx >= 0 && sy >= 0 && sx < width && sy < height && Number.isFinite(depth[sy * width + sx])) inside += 1;
+    }
+    if (inside >= total * .2) {
+      const f = (value: number) => (Math.round(value * 10) / 10).toFixed(1);
+      annotations.push(`<circle cx="${f(centre[0])}" cy="${f(centre[1])}" r="${f(radius)}"/>`);
+      const [dx, dy] = chooseDirection(centre);
+      place('A', [centre[0] + dx * radius, centre[1] + dy * radius], [dx, dy]);
+      labelCount += 1;
+    }
   }
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeXml(label)}">` +
     `<rect width="${width}" height="${height}" fill="#ffffff"/>` +

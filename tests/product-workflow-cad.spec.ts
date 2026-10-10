@@ -49,6 +49,13 @@ test('网格投影：隐藏线消除后每个视角只剩可见轮廓，输出�
   expect(renderMeshView(testMesh, { direction: [1, 0.75, 0.55], labels: [{ text: '<b>', point: [60, 30, 30] }] }).svg).toContain('&lt;b&gt;');
   expect(() => partLabels(testAssemblyMesh, [{ number: '1', name: '底座' }, { number: '2', name: '夹持座' }, { number: '3', name: '螺栓' }])).toThrow();
   expect(partLabels(testAssemblyMesh, [{ number: '1', name: '底座' }, { number: '2', name: '夹持座' }]).map(label => label.point)).toEqual([[60, 30, 15], [60, 30, 45]]);
+  // 悬空检查：把夹持座抬高 5 毫米后与底座不再接触，应被拒绝并点名该部件。
+  const floating = { ...testAssemblyMesh, vertices: testAssemblyMesh.vertices.map((vertex, index) => index >= 8 ? [vertex[0], vertex[1], vertex[2] + 5] as [number, number, number] : vertex) };
+  let floatingError: unknown;
+  try { partLabels(floating, [{ number: '1', name: '底座' }, { number: '2', name: '夹持座' }]); } catch (error) { floatingError = error; }
+  expect(floatingError).toMatchObject({ code: 'CAD_PARTS_FLOATING', details: ['1 底座', '2 夹持座'] });
+  // A 圈圈到图外空白时不画。
+  expect(renderMeshView(testAssemblyMesh, { direction: [1, 0.75, 0.55], keyCircle: { point: [600, 600, 600], radius: 5 } }).svg).not.toContain('<circle');
   const annotated = renderCadViews(testAssemblyMesh, '测试', { point: [60, 30, 45], radius: 24 });
   expect(annotated.filter(view => view.svg.includes('<circle')).map(view => view.view)).toEqual(['iso']);
   expect(annotated.every(view => view.svg.includes('>1<') && view.svg.includes('>2<'))).toBe(true);

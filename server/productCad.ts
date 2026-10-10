@@ -34,8 +34,10 @@ keyStructure 可选：改进要点所在结构的中心点与圈选半径（毫�
 2. 必须定义 def build_model(): 并返回一个字典：键是 components 中的部件编号字符串，值是该部件的 Part 形状，例如 return {"1": base, "2": seat, "3": bolt}。每个部件单独成形（同一部件内部可以 fuse/cut），不同部件之间不要 fuse 成一个整体，系统要按部件分别标号。不要在模块顶层调用 build_model()，不要 print。
 3. 单位毫米，整体尺寸合理（最长边 50 至 3000 毫米），所有部件放在同一坐标系中：X 向右为产品宽度方向，Y 向后为产品深度方向，Z 向上为高度方向；产品正面朝向 -Y，使前视图从 -Y 方向观察、俯视图从 +Z 俯视、右视图从 +X 观察。
 4. 只用 Part.makeBox、Part.makeCylinder、Part.makeCone、Part.makeSphere、Part.makeTorus、Part.makePolygon/Face/extrude、旋转平移 translate/rotate 以及 fuse、cut、common 布尔运算；不要用倒角、圆角、螺纹、放样、扫掠或草图，避免布尔失败。
-5. 字典必须覆盖 components 的全部编号且不多不少，按简介的编号顺序依次构建，每个部件用一行注释标明编号和名称；相邻部件必须真实接触或嵌合，不能悬空，也不能无故穿透。
-6. 脚本 ${CAD_SCRIPT_MAX_LENGTH} 字符以内，保持简洁，不输出任何代码之外的解释。`;
+5. 字典必须覆盖 components 的全部编号且不多不少，按简介的编号顺序依次构建，每个部件用一行注释标明编号和名称。部件的数量、形状和布置必须与简介一致：简介说"两扇门叶并排"就必须有两个门叶零件并排布置，说"四个支脚"就必须有四个；不能用一个零件代替多个，也不能漏掉简介里的部件。
+6. 每个部件必须与至少一个相邻部件真实接触或嵌合（表面贴合、插入或共面），系统会检查悬空：包围盒与其他任何部件都不接触的部件会被拒绝。不能无故穿透；板件要落在框架上，杆件两端要落在被连接的零件上。
+7. 一个部件若由多个实体组成，必须在脚本里 fuse 成一个实体再返回。
+8. 脚本 ${CAD_SCRIPT_MAX_LENGTH} 字符以内，保持简洁，不输出任何代码之外的解释。`;
 
 export function validateCadScript(script: unknown): string[] {
   const errors: string[] = [];
@@ -117,6 +119,13 @@ try:
     for key, part in parts:
         if not hasattr(part, 'ShapeType') or part.isNull():
             raise RuntimeError('part %s is not a valid Part shape' % key)
+        # 同一部件若由多个实体拼成，先融合成一个实体，否则内部分界线会在附图里露出来。
+        solids = list(getattr(part, 'Solids', []) or [])
+        if len(solids) > 1:
+            merged = solids[0]
+            for solid in solids[1:]:
+                merged = merged.fuse(solid)
+            part = merged
         try:
             part = part.removeSplitter()
         except Exception:
@@ -238,20 +247,36 @@ export function renderCadViews(mesh: Mesh, label: string, keyStructure?: { point
 }
 
 export type CadImageInput = { templateId: string; dataUrl: string };
-/** 网格里的部件必须与简介部件编号一一对应；标号记录保存每个部件的几何中心，供核对。 */
-export function partLabels(mesh: Mesh, components: { number: string; name: string }[]): CadLabel[] {
+/** 网格里的部件必须与简介部件编号一一对应，且每个部件都要和至少一个其他部件接触（不能悬空）；标号记录保存每个部件的几何中心。 */
+export function partLabels(mesh: Mesh, components: { number: string; name: string }[], contactTolerance = 1): CadLabel[] {
   const present = new Set(mesh.parts || []);
   const missing = components.filter(part => !present.has(part.number));
   const extra = [...present].filter(number => !components.some(part => part.number === number));
   if (missing.length || extra.length) throw new AiFailure(502, 'CAD_PARTS_MISMATCH', '模型脚本返回的部件编号与简介部件清单不一致，未生成附图；请重试让模型按编号逐件返回。',
     [...(missing.length ? [`缺少：${missing.map(part => `${part.number} ${part.name}`).join('；')}`] : []), ...(extra.length ? [`多出：${extra.join('、')}`] : [])]);
-  return components.map(part => {
-    const sum = [0, 0, 0]; let count = 0;
-    for (const [index, triangle] of mesh.triangles.entries()) {
-      if (mesh.parts![index] !== part.number) continue;
-      for (const vertex of triangle) { const point = mesh.vertices[vertex]; sum[0] += point[0]; sum[1] += point[1]; sum[2] += point[2]; count += 1; }
+  const boxes = new Map<string, { min: [number, number, number]; max: [number, number, number]; sum: [number, number, number]; count: number }>();
+  for (const [index, triangle] of mesh.triangles.entries()) {
+    const number = mesh.parts![index];
+    let box = boxes.get(number);
+    if (!box) { box = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity], sum: [0, 0, 0], count: 0 }; boxes.set(number, box); }
+    for (const vertex of triangle) {
+      const point = mesh.vertices[vertex];
+      for (let axis = 0; axis < 3; axis++) { box.min[axis] = Math.min(box.min[axis], point[axis]); box.max[axis] = Math.max(box.max[axis], point[axis]); box.sum[axis] += point[axis]; }
+      box.count += 1;
     }
-    return { number: part.number, name: part.name, point: [sum[0] / count, sum[1] / count, sum[2] / count].map(value => Math.round(value * 100) / 100) as [number, number, number] };
+  }
+  if (components.length > 1) {
+    const touching = (a: string, b: string) => {
+      const first = boxes.get(a)!, second = boxes.get(b)!;
+      return [0, 1, 2].every(axis => Math.max(first.min[axis] - second.max[axis], second.min[axis] - first.max[axis]) <= contactTolerance);
+    };
+    const floating = components.filter(part => !components.some(other => other.number !== part.number && touching(part.number, other.number)));
+    if (floating.length) throw new AiFailure(502, 'CAD_PARTS_FLOATING', '模型中有部件悬空，没有与任何其他部件接触，未生成附图；请重试让模型把部件真实装配在一起。',
+      floating.map(part => `${part.number} ${part.name}`));
+  }
+  return components.map(part => {
+    const box = boxes.get(part.number)!;
+    return { number: part.number, name: part.name, point: box.sum.map(value => Math.round(value / box.count * 100) / 100) as [number, number, number] };
   });
 }
 export function isCadImageInputs(value: unknown): value is CadImageInput[] {
