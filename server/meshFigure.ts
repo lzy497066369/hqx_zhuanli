@@ -3,7 +3,8 @@
 import { createHash } from 'node:crypto';
 
 export type Vec3 = [number, number, number];
-export type Mesh = { vertices: Vec3[]; triangles: [number, number, number][] };
+/** parts[i] 是第 i 个三角面所属的部件编号；有了它，投影时能精确知道每个像素属于哪个部件。 */
+export type Mesh = { vertices: Vec3[]; triangles: [number, number, number][]; parts?: string[] };
 export const MAX_MESH_VERTICES = 400000;
 export const MAX_MESH_TRIANGLES = 200000;
 const MAX_RENDER_TRIANGLES = 120000;
@@ -18,6 +19,7 @@ export function isMesh(value: unknown): value is Mesh {
   const mesh = value as Mesh;
   if (!Array.isArray(mesh.vertices) || !mesh.vertices.length || mesh.vertices.length > MAX_MESH_VERTICES || !mesh.vertices.every(triple)) return false;
   if (!Array.isArray(mesh.triangles) || !mesh.triangles.length || mesh.triangles.length > MAX_MESH_TRIANGLES) return false;
+  if (mesh.parts !== undefined && (!Array.isArray(mesh.parts) || mesh.parts.length !== mesh.triangles.length || !mesh.parts.every(part => typeof part === 'string' && /^\d{1,3}$/.test(part)))) return false;
   return mesh.triangles.every(triangle => Array.isArray(triangle) && triangle.length === 3 && triangle.every(index =>
     Number.isSafeInteger(index) && index >= 0 && index < mesh.vertices.length) && new Set(triangle).size === 3);
 }
@@ -27,6 +29,7 @@ export function meshDigest(mesh: Mesh): string {
   for (const vertex of mesh.vertices) hash.update(vertex.map(value => value.toFixed(4)).join(','));
   hash.update('|');
   for (const triangle of mesh.triangles) hash.update(triangle.join(','));
+  if (mesh.parts) { hash.update('|'); hash.update(mesh.parts.join(',')); }
   return hash.digest('hex');
 }
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -41,19 +44,21 @@ export type FigureLabel = { text: string; point: Vec3 };
 export type KeyCircle = { point: Vec3; radius: number };
 export type ProjectionOptions = {
   direction: Vec3; up?: Vec3; width?: number; height?: number; margin?: number; label?: string;
-  /** 部件标号：数字放在轮廓外侧留白处，细弧形引出线落在部件表面（锚点会吸附到最近的可见网格顶点）。 */
+  /** 显式锚点标号（数字放在轮廓外侧留白处，细弧形引出线落到锚点吸附的可见顶点）。 */
   labels?: FigureLabel[];
+  /** 按网格的 parts 自动标号：引出线落在该部件在本视角可见区域的中心，被完全遮住的部件不标。 */
+  partLabels?: boolean;
   /** 关键结构圈选：细实线圆圈叠加在结构上，并以引出线连接字母 A。 */
   keyCircle?: KeyCircle;
 };
-export type ProjectionResult = { svg: string; width: number; height: number; visibleSegments: number; featureEdges: number; labelCount: number };
+export type ProjectionResult = { svg: string; width: number; height: number; visibleSegments: number; featureEdges: number; labelCount: number; labelledParts: string[] };
 const escapeXml = (text: string) => text.replace(/[<>&"]/g, character => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[character]!);
 
 /** 正交投影 + 深度缓冲隐藏线消除；同一份网格的不同视角共用这一个实现。 */
 export function renderMeshView(mesh: Mesh, options: ProjectionOptions): ProjectionResult {
   const width = Math.round(options.width ?? 1400);
   const height = Math.round(options.height ?? 1000);
-  const annotated = !!(options.labels?.length || options.keyCircle);
+  const annotated = !!(options.labels?.length || options.keyCircle || (options.partLabels && mesh.parts));
   const margin = Math.round(options.margin ?? (annotated ? 150 : 70));
   if (width < 200 || width > 6000 || height < 200 || height > 6000) throw new Error('附图画布尺寸超出范围。');
   const view = unit(options.direction);
@@ -106,7 +111,12 @@ export function renderMeshView(mesh: Mesh, options: ProjectionOptions): Projecti
   const bias = Math.max(diagonal * 0.004, 0.05);
   const looseBias = Math.max(diagonal * 0.03, 0.5);
   const depth = new Float32Array(width * height).fill(-Infinity);
-  for (const triangle of triangles) {
+  // 部件编号缓冲：与深度缓冲同步更新，记录每个像素最前面的三角面属于哪个部件（索引 +1，0 为背景）。
+  const partIds = mesh.parts ? [...new Set(mesh.parts)].sort((a, b) => Number(a) - Number(b)) : [];
+  const partIndex = new Map(partIds.map((id, index) => [id, index + 1]));
+  const owner = partIds.length ? new Int16Array(width * height) : undefined;
+  for (const [triangleIndex, triangle] of triangles.entries()) {
+    const ownerId = owner ? partIndex.get(mesh.parts![triangleIndex]) ?? 0 : 0;
     const rasterized = triangle.map(index => { const pixel = toPixel(screen[index]); return [pixel[0], pixel[1], screen[index][2]] as Vec3; });
     const minX = Math.max(0, Math.floor(Math.min(rasterized[0][0], rasterized[1][0], rasterized[2][0])));
     const maxX = Math.min(width - 1, Math.ceil(Math.max(rasterized[0][0], rasterized[1][0], rasterized[2][0])));
@@ -124,7 +134,7 @@ export function renderMeshView(mesh: Mesh, options: ProjectionOptions): Projecti
         if (w0 < -1e-6 || w1 < -1e-6 || w2 < -1e-6) continue;
         const value = w0 * rasterized[0][2] + w1 * rasterized[1][2] + w2 * rasterized[2][2];
         const at = y * width + x;
-        if (value > depth[at]) depth[at] = value;
+        if (value > depth[at]) { depth[at] = value; if (owner) owner[at] = ownerId; }
       }
     }
   }
@@ -202,8 +212,8 @@ export function renderMeshView(mesh: Mesh, options: ProjectionOptions): Projecti
     const ty = dy > 1e-9 ? (fy1 - anchor[1]) / dy : dy < -1e-9 ? (fy0 - anchor[1]) / dy : Infinity;
     return Math.max(0, Math.min(tx, ty));
   };
-  /** 在 8 个方向里选引出线最短、且不和已有标号挤在一起的一侧，数字落在轮廓外侧留白处。 */
-  const chooseDirection = (anchor: [number, number]): [number, number] => {
+  /** 在 8 个方向里选引出线最短、尽量不穿过其他部件、且不和已有标号挤在一起的一侧，数字落在轮廓外侧留白处。 */
+  const chooseDirection = (anchor: [number, number], own = 0): [number, number] => {
     let best: { dx: number; dy: number; cost: number } | undefined;
     for (let step = 0; step < 8; step++) {
       const angle = step * Math.PI / 4;
@@ -212,13 +222,23 @@ export function renderMeshView(mesh: Mesh, options: ProjectionOptions): Projecti
       const lx = anchor[0] + dx * reach, ly = anchor[1] + dy * reach;
       const crowding = placed.reduce((sum, point) => sum + Math.max(0, fontSize * 3 - Math.hypot(point[0] - lx, point[1] - ly)), 0);
       const outside = lx < fontSize || ly < fontSize || lx > width - fontSize || ly > height - fontSize ? width : 0;
-      const cost = reach + crowding * 2 + outside;
+      // 沿引出线采样：落在其他部件（或非本部件的任何实体）上的像素越多，越不该从这边引出。
+      let crossing = 0;
+      const samples = Math.max(8, Math.min(80, Math.round(reach / 6)));
+      for (let index = 1; index <= samples; index++) {
+        const sx = Math.floor(anchor[0] + dx * reach * index / samples), sy = Math.floor(anchor[1] + dy * reach * index / samples);
+        if (sx < 0 || sy < 0 || sx >= width || sy >= height) continue;
+        const at = sy * width + sx;
+        if (!Number.isFinite(depth[at])) continue;
+        if (!owner || owner[at] !== own) crossing += 1;
+      }
+      const cost = reach + crowding * 2 + outside + crossing * (reach / samples) * 3;
       if (!best || cost < best.cost) best = { dx, dy, cost };
     }
     return [best!.dx, best!.dy];
   };
-  const place = (text: string, anchor: [number, number], direction?: [number, number]) => {
-    const [dx, dy] = direction ?? chooseDirection(anchor);
+  const place = (text: string, anchor: [number, number], direction?: [number, number], own = 0) => {
+    const [dx, dy] = direction ?? chooseDirection(anchor, own);
     const reach = exitDistance(anchor, dx, dy) + margin * .45;
     const pad = fontSize;
     let lx = Math.min(width - pad, Math.max(pad, anchor[0] + dx * reach));
@@ -239,9 +259,36 @@ export function renderMeshView(mesh: Mesh, options: ProjectionOptions): Projecti
       `<text x="${f(lx)}" y="${f(ly + fontSize * .35)}">${escapeXml(text)}</text>`);
   };
   let labelCount = 0;
+  const labelledParts: string[] = [];
   for (const item of options.labels || []) {
     place(item.text, toPixel(snap(item.point)));
     labelCount += 1;
+  }
+  if (options.partLabels && owner) {
+    // 每个部件在本视角的可见像素：取可见区域质心附近最近的可见像素作为引出线落点，可见面积太小的部件不标。
+    const sums = partIds.map(() => ({ x: 0, y: 0, count: 0 }));
+    for (let at = 0; at < owner.length; at++) {
+      const id = owner[at];
+      if (!id) continue;
+      const stat = sums[id - 1];
+      stat.x += at % width; stat.y += Math.floor(at / width); stat.count += 1;
+    }
+    const anchors = partIds.map(() => ({ x: 0, y: 0, distance: Infinity }));
+    for (let at = 0; at < owner.length; at++) {
+      const id = owner[at];
+      if (!id) continue;
+      const stat = sums[id - 1];
+      const cx = stat.x / stat.count, cy = stat.y / stat.count;
+      const x = at % width, y = Math.floor(at / width);
+      const distance = Math.hypot(x - cx, y - cy);
+      if (distance < anchors[id - 1].distance) anchors[id - 1] = { x, y, distance };
+    }
+    const minimumArea = fontSize * fontSize * .6;
+    for (const [index, id] of partIds.entries()) {
+      if (sums[index].count < minimumArea) continue;
+      place(id, [anchors[index].x + .5, anchors[index].y + .5], undefined, index + 1);
+      labelCount += 1; labelledParts.push(id);
+    }
   }
   if (options.keyCircle) {
     const centre = toPixel(project(options.keyCircle.point));
@@ -259,5 +306,5 @@ export function renderMeshView(mesh: Mesh, options: ProjectionOptions): Projecti
     (annotations.length ? `<g fill="none" stroke="#000000" stroke-width="1.2" stroke-linecap="round" font-family="'Times New Roman', 'SimSun', serif" font-size="${fontSize}" text-anchor="middle">` +
       annotations.map(item => item.startsWith('<text') ? item.replace('<text ', '<text fill="#000000" stroke="none" ') : item).join('') + '</g>' : '') +
     '</svg>';
-  return { svg, width, height, visibleSegments, featureEdges: edges.length, labelCount };
+  return { svg, width, height, visibleSegments, featureEdges: edges.length, labelCount, labelledParts };
 }

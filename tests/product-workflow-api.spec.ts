@@ -9,7 +9,7 @@ import { signProductArtifact } from '../server/productProof';
 import { applyConflictChoices, imageReference, isProductWorkflow, isProductWorkflowComplete, isLogicResult, isProductDesign, isProductImage, isProductReview, previewReference, PREVIEW_VIEWS } from '../src/features/product/productWorkflow';
 import type { ProductReview, ProductBrief, ProductCad, ProductMaterials, ProductPreview, PreviewConfirmation, RevisionResponse } from '../src/features/product/productWorkflow';
 import { buildPatentFigurePrompt, buildPreviewPrompt, PATENT_FIGURE_TEMPLATES } from '../src/features/product/productPrompts';
-import { documentContent, imageBytes, jsonEnvelope, logicalResult, makeBrief, makeDesign, makeImage, makePreview, makeReview, makeWorkflow, productConfig, productSelection, testCadLabels, testCadScript } from './fixtures/productWorkflow';
+import { documentContent, imageBytes, jsonEnvelope, logicalResult, makeBrief, makeDesign, makeImage, makePreview, makeReview, makeWorkflow, productConfig, productSelection, testCadScript } from './fixtures/productWorkflow';
 
 const signal = () => new AbortController().signal;
 const imageEnvelope = () => new Response(JSON.stringify({ data: [{ b64_json: imageBytes.toString('base64') }] }));
@@ -23,7 +23,7 @@ function modelFetcher(calls: { url: string; payload: Record<string, unknown>; au
     const input = JSON.parse(typeof user === 'string' ? user : user[0].text);
     if (prompt.includes('产品方案逻辑审查助手')) return jsonEnvelope(logicalResult());
     if (prompt.includes('产品定义与专利技术交底助手')) return jsonEnvelope(makeDesign(input.selection));
-    if (prompt.includes('CAD 建模助手')) return jsonEnvelope({ summary: '按简介建立底座模型。', assumptions: ['尺寸推定。'], script: testCadScript, labels: testCadLabels, keyStructure: { point: [120, 30, 15], radius: 12 } });
+    if (prompt.includes('CAD 建模助手')) return jsonEnvelope({ summary: '按简介建立底座模型。', assumptions: ['尺寸推定。'], script: testCadScript, keyStructure: { point: [60, 30, 44], radius: 12 } });
     return jsonEnvelope(documentContent);
   };
 }
@@ -59,7 +59,7 @@ test('四个预览视角各自注入同一简介且只画一个视角；黑白�
   for (const view of PREVIEW_VIEWS) {
     const color = buildPreviewPrompt(brief, view.templateId);
     expect(color).toContain(brief.description); expect(color).toContain(view.requirement); expect(color).toContain(`只画${view.title}这一个视角`); expect(color).not.toMatch(/\{\{.+?\}\}/);
-    expect(color).toContain('【部件标号】'); expect(color).toContain('1 轨道底座；2 夹持座；3 锁紧螺栓');
+    expect(color).not.toContain('部件标号'); expect(color).toContain('不要在图中添加数字');
   }
   const patent = buildPatentFigurePrompt(brief, 'patent-structure');
   expect(patent).toContain(brief.description); expect(patent).toContain('不要爆炸图，不要额外添加多个视角'); expect(patent).toContain('1：轨道底座');
@@ -94,10 +94,10 @@ test('独立文本与生图密钥只在服务器配置，四张预览并行生�
     const cad = await service(PRODUCT_PATHS.cad, { brief, confirmation, images }, signal()) as ProductCad;
     expect(cad.briefId).toBe(brief.id); expect(cad.views.map(view => view.title)).toEqual(['立体图', '前视图', '俯视图', '右视图']); expect(cad.script).toBe(testCadScript);
     expect(cad.views.every(view => view.svg.startsWith('<svg') && view.svg.includes('<path'))).toBe(true);
-    // 每个视角都带 1、2、3 部件标号，A 圈选只出现在立体图。
-    expect(cad.views.every(view => ['>1<', '>2<', '>3<'].every(mark => view.svg.includes(mark)))).toBe(true);
+    // 标号来自网格的部件归属：每个视角只标可见部件，A 圈选只出现在立体图；标号记录与简介部件一一对应。
+    expect(cad.views.find(view => view.view === 'iso')!.svg).toContain('>1<'); expect(cad.views.find(view => view.view === 'iso')!.svg).toContain('>2<');
     expect(cad.views.filter(view => view.svg.includes('<circle')).map(view => view.view)).toEqual(['iso']);
-    expect(cad.labels).toEqual(testCadLabels);
+    expect(cad.labels.map(label => `${label.number} ${label.name}`)).toEqual(['1 轨道底座', '2 夹持座', '3 锁紧螺栓']);
     const vision = calls.find(call => String(call.payload.messages?.[0]?.content).includes('CAD 建模助手'))!;
     expect((vision.payload.messages as { content: unknown }[])[1].content).toHaveLength(5);
     const materials = await service(PRODUCT_PATHS.materials, { brief, confirmation }, signal()) as ProductMaterials;

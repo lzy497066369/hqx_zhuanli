@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
-import { resolveFreeCad, runFreeCad, validateCadScript, cadDecisionErrors, isCadImageInputs, renderCadViews } from '../server/productCad';
+import { resolveFreeCad, runFreeCad, validateCadScript, cadDecisionErrors, isCadImageInputs, renderCadViews, partLabels } from '../server/productCad';
 import { isMesh, meshDigest, renderMeshView } from '../server/meshFigure';
-import { productConfig, testCadLabels, testCadScript, testMesh } from './fixtures/productWorkflow';
+import { productConfig, testAssemblyMesh, testCadScript, testMesh } from './fixtures/productWorkflow';
 
 test('CAD 脚本静态校验：只放行 FreeCAD/Part/math，拒绝文件、网络、反射与顶层调用', () => {
   expect(validateCadScript(testCadScript)).toEqual([]);
@@ -12,10 +12,8 @@ test('CAD 脚本静态校验：只放行 FreeCAD/Part/math，拒绝文件、网�
     expect(errors, bad).not.toEqual([]);
   }
   expect(validateCadScript(`import Part\ndef build_model():\n    return Part.makeBox(1, 1, 1)\n# import os in a comment is fine\n`)).toEqual([]);
-  expect(cadDecisionErrors({ summary: 'ok', assumptions: [], script: testCadScript, labels: testCadLabels })).toEqual([]);
-  expect(cadDecisionErrors({ summary: 'ok', assumptions: [], script: testCadScript, labels: testCadLabels.slice(0, 2) }, [{ number: '1', name: 'a' }, { number: '2', name: 'b' }, { number: '3', name: 'c' }])).toEqual([expect.stringContaining('缺少部件标号：3 c')]);
-  expect(cadDecisionErrors({ summary: 'ok', assumptions: [], script: testCadScript, labels: testCadLabels, keyStructure: { point: [0, 0], radius: 1 } })).toEqual([expect.stringContaining('keyStructure')]);
-  expect(cadDecisionErrors({ summary: 'ok', assumptions: [], script: testCadScript })).toEqual([expect.stringContaining('labels')]);
+  expect(cadDecisionErrors({ summary: 'ok', assumptions: [], script: testCadScript })).toEqual([]);
+  expect(cadDecisionErrors({ summary: 'ok', assumptions: [], script: testCadScript, keyStructure: { point: [0, 0], radius: 1 } })).toEqual([expect.stringContaining('keyStructure')]);
   expect(cadDecisionErrors({ summary: '', assumptions: 'x', script: 1 }).length).toBeGreaterThanOrEqual(3);
 });
 test('视觉输入只接受已登记视角的 PNG/JPEG/WebP data URL，并限制大小', () => {
@@ -43,19 +41,24 @@ test('网格投影：隐藏线消除后每个视角只剩可见轮廓，输出�
   const views = renderCadViews(testMesh, '测试');
   expect(views.map(view => view.view)).toEqual(['iso', 'front', 'top', 'right']);
   expect(views.every(view => /^[a-f0-9]{64}$/.test(view.digest) && !view.svg.includes('<script'))).toBe(true);
-  // 标号：数字在轮廓外侧留白、引出线为二次曲线；A 圈选只画在立体图；标号文字做了 XML 转义。
-  const labelled = renderMeshView(testMesh, { direction: [1, 0.75, 0.55], labels: [{ text: '1', point: [60, 0, 15] }, { text: '2', point: [120, 30, 15] }, { text: '<b>', point: [60, 30, 30] }], keyCircle: { point: [120, 30, 15], radius: 12 } });
-  expect(labelled.labelCount).toBe(4); expect(labelled.svg).toContain('>1<'); expect(labelled.svg).toContain('&lt;b&gt;'); expect(labelled.svg).toContain('<circle'); expect(labelled.svg).toContain('>A<');
-  expect((labelled.svg.match(/ Q /g) || []).length).toBe(4);
-  const annotated = renderCadViews(testMesh, '测试', [{ number: '1', name: '底座', point: [60, 0, 15] }], { point: [120, 30, 15], radius: 12 });
+  // 按部件标号：引出线落在该部件可见区域的中心；被遮住的部件在该视角不标；标号文字做了 XML 转义。
+  const isoLabels = renderMeshView(testAssemblyMesh, { direction: [1, 0.75, 0.55], partLabels: true, keyCircle: { point: [60, 30, 45], radius: 24 } });
+  expect(isoLabels.labelledParts).toEqual(['1', '2']); expect(isoLabels.labelCount).toBe(3); expect(isoLabels.svg).toContain('>1<'); expect(isoLabels.svg).toContain('>2<'); expect(isoLabels.svg).toContain('<circle'); expect(isoLabels.svg).toContain('>A<');
+  const bottom = renderMeshView(testAssemblyMesh, { direction: [0, 0, -1], up: [0, 1, 0], partLabels: true });
+  expect(bottom.labelledParts).toEqual(['1']);
+  expect(renderMeshView(testMesh, { direction: [1, 0.75, 0.55], labels: [{ text: '<b>', point: [60, 30, 30] }] }).svg).toContain('&lt;b&gt;');
+  expect(() => partLabels(testAssemblyMesh, [{ number: '1', name: '底座' }, { number: '2', name: '夹持座' }, { number: '3', name: '螺栓' }])).toThrow();
+  expect(partLabels(testAssemblyMesh, [{ number: '1', name: '底座' }, { number: '2', name: '夹持座' }]).map(label => label.point)).toEqual([[60, 30, 15], [60, 30, 45]]);
+  const annotated = renderCadViews(testAssemblyMesh, '测试', { point: [60, 30, 45], radius: 24 });
   expect(annotated.filter(view => view.svg.includes('<circle')).map(view => view.view)).toEqual(['iso']);
-  expect(annotated.every(view => view.svg.includes('>1<'))).toBe(true);
+  expect(annotated.every(view => view.svg.includes('>1<') && view.svg.includes('>2<'))).toBe(true);
 });
 test('FreeCAD 命令行：脚本在隔离目录执行，失败和超时不产出附图', async () => {
   const command = await resolveFreeCad(productConfig);
   test.skip(!command, '本机未安装 FreeCAD，跳过真实建模测试。');
   const run = await runFreeCad(testCadScript, command!, { timeoutMs: 120000 });
-  expect(run.mesh.vertices.length).toBeGreaterThanOrEqual(8); expect(run.bbox).toEqual([0, 0, 0, 120, 60, 30]);
+  expect(run.mesh.vertices.length).toBeGreaterThanOrEqual(16); expect(run.bbox).toEqual([0, 0, 0, 120, 60, 64]);
+  expect([...new Set(run.mesh.parts)].sort()).toEqual(['1', '2', '3']);
   expect(renderCadViews(run.mesh, '测试')).toHaveLength(4);
   await expect(runFreeCad('import Part\ndef build_model():\n    return Part.makeBox(0, 0, 0)\n', command!, { timeoutMs: 120000 })).rejects.toMatchObject({ code: 'CAD_SCRIPT_FAILED' });
   await expect(runFreeCad('import Part\ndef build_model():\n    import os\n    return Part.makeBox(1, 1, 1)\n', command!, { timeoutMs: 120000 })).rejects.toMatchObject({ code: 'CAD_SCRIPT_REJECTED' });

@@ -5,7 +5,7 @@ const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
 for (const v of ['iso','front','top','right']) {
   const svg = await fs.readFile(`artifacts/cad-smoke/${v}.svg`, 'utf8');
   await page.setContent(`<body style="margin:0">${svg}</body>`);
-  await page.screenshot({ path: `artifacts/cad-smoke/${v}.png` });
+  await page.screenshot({ path: `artifacts/cad-smoke/${v}-v2.png` });
 }
 await browser.close();
 console.log('rasterized');

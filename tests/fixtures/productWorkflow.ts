@@ -71,17 +71,23 @@ export function makePreview(brief = makeBrief(), id = `preview-${brief.id}`): Pr
   return { ...signProductArtifact('preview', { id, briefId: brief.id, viewIds: PREVIEW_VIEWS.map(view => view.id), digest, createdAt: when }, productConfig), images };
 }
 /** 固定长方体网格：不依赖 FreeCAD 即可确定性地测试投影与 Word 嵌入。 */
-export const testMesh: Mesh = {
-  vertices: [[0, 0, 0], [120, 0, 0], [120, 60, 0], [0, 60, 0], [0, 0, 30], [120, 0, 30], [120, 60, 30], [0, 60, 30]],
-  triangles: [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]],
-};
-export const testCadScript = 'import Part\nfrom FreeCAD import Vector\n\ndef build_model():\n    # 1 轨道底座\n    return Part.makeBox(120, 60, 30, Vector(0, 0, 0))\n';
-export const testCadLabels = [{ number: '1', name: '轨道底座', point: [60, 0, 15] as [number, number, number] }, { number: '2', name: '夹持座', point: [120, 30, 15] as [number, number, number] }, { number: '3', name: '锁紧螺栓', point: [60, 30, 30] as [number, number, number] }];
+function boxMesh(origin: [number, number, number], size: [number, number, number], part: string, base: number): Mesh {
+  const [x, y, z] = origin, [w, d, h] = size;
+  return { vertices: [[x, y, z], [x + w, y, z], [x + w, y + d, z], [x, y + d, z], [x, y, z + h], [x + w, y, z + h], [x + w, y + d, z + h], [x, y + d, z + h]],
+    triangles: ([[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]] as [number, number, number][]).map(triangle => triangle.map(index => index + base) as [number, number, number]),
+    parts: Array<string>(12).fill(part) };
+}
+export const testMesh: Mesh = boxMesh([0, 0, 0], [120, 60, 30], '1', 0);
+/** 两个零件：底座 1 与放在其顶面的夹持座 2，用于测试按部件标号与遮挡。 */
+const seat = boxMesh([40, 10, 30], [40, 40, 30], '2', 8);
+export const testAssemblyMesh: Mesh = { vertices: [...testMesh.vertices, ...seat.vertices], triangles: [...testMesh.triangles, ...seat.triangles], parts: [...testMesh.parts!, ...seat.parts!] };
+export const testCadScript = 'import Part\nfrom FreeCAD import Vector\n\ndef build_model():\n    # 1 轨道底座\n    base = Part.makeBox(120, 60, 14, Vector(0, 0, 0))\n    # 2 夹持座\n    seat = Part.makeBox(40, 40, 30, Vector(40, 10, 14))\n    # 3 锁紧螺栓\n    bolt = Part.makeCylinder(4, 20, Vector(60, 30, 44), Vector(0, 0, 1))\n    return {"1": base, "2": seat, "3": bolt}\n';
+export const testCadLabels = [{ number: '1', name: '轨道底座', point: [60, 30, 15] as [number, number, number] }, { number: '2', name: '夹持座', point: [60, 30, 45] as [number, number, number] }];
 export function makeCad(brief = makeBrief(), id = `cad-${brief.id}`): ProductCad {
-  return signProductArtifact('cad', { id, briefId: brief.id, script: testCadScript, summary: '测试用长方体底座模型。', assumptions: ['尺寸为测试推定。'], labels: testCadLabels,
-    keyStructure: { point: [120, 30, 15] as [number, number, number], radius: 12 },
-    meshDigest: meshDigest(testMesh), vertexCount: testMesh.vertices.length, triangleCount: testMesh.triangles.length, freecadVersion: 'test',
-    views: renderCadViews(testMesh, '测试', testCadLabels, { point: [120, 30, 15], radius: 12 }), createdAt: when }, productConfig);
+  return signProductArtifact('cad', { id, briefId: brief.id, script: testCadScript, summary: '测试用底座与夹持座模型。', assumptions: ['尺寸为测试推定。'], labels: testCadLabels,
+    keyStructure: { point: [60, 30, 45] as [number, number, number], radius: 24 },
+    meshDigest: meshDigest(testAssemblyMesh), vertexCount: testAssemblyMesh.vertices.length, triangleCount: testAssemblyMesh.triangles.length, freecadVersion: 'test',
+    views: renderCadViews(testAssemblyMesh, '测试', { point: [60, 30, 45], radius: 24 }), createdAt: when }, productConfig);
 }
 export const documentContent = { abstract: '本产品通过滑槽引导夹持座移动，并通过锁紧螺栓固定，适用于光伏组件安装。',
   claims: ['1. 一种带滑槽锁紧结构的光伏组件安装支架，包括轨道底座、夹持座和锁紧螺栓，其特征在于所述夹持座与所述轨道底座滑动配合。', '2. 根据权利要求1所述的光伏组件安装支架，其特征在于所述锁紧螺栓用于固定所述夹持座。'],

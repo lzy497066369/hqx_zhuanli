@@ -15,7 +15,7 @@ def build_model():
     # 3 锁紧螺栓
     bolt = Part.makeCylinder(5, 30, Vector(105, 40, 54), Vector(0, 0, 1))
     head = Part.makeCylinder(9, 6, Vector(105, 40, 84), Vector(0, 0, 1))
-    return base.fuse(seat).fuse(bolt).fuse(head)
+    return {'1': base, '2': seat, '3': bolt.fuse(head)}
 `;
 console.log('validate:', validateCadScript(script));
 const cmd = await resolveFreeCad({ baseUrl: '', apiKey: '', model: '' });
@@ -24,6 +24,6 @@ const t = Date.now();
 const run = await runFreeCad(script, cmd, { timeoutMs: 120000 });
 console.log('run ms', Date.now() - t, 'version', run.version, 'verts', run.mesh.vertices.length, 'tris', run.mesh.triangles.length, 'bbox', run.bbox);
 const t2 = Date.now();
-const views = renderCadViews(run.mesh, '测试', [{number:'1',name:'轨道底座',point:[40,70,14]},{number:'2',name:'夹持座',point:[80,40,40]},{number:'3',name:'锁紧螺栓',point:[105,40,80]}], { point:[105,40,87], radius:14 });
+const views = renderCadViews(run.mesh, '测试', { point:[105,40,87], radius:14 });
 console.log('render ms', Date.now() - t2);
 for (const v of views) { await fs.writeFile(`artifacts/cad-smoke/${v.view}.svg`, v.svg); console.log(v.view, v.svg.length, 'bytes'); }
