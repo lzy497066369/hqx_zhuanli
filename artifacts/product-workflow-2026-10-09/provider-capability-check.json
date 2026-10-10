@@ -1,0 +1,6 @@
+{
+  "imageModelAttempt": "gpt-image-1",
+  "status": 403,
+  "diagnostic": "{\"error\":{\"message\":\"Image generation is not enabled for this group\",\"type\":\"permission_error\"}}",
+  "checkedAt": "2026-10-09T09:22:59.062Z"
+}

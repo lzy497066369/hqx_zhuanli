@@ -1,0 +1,163 @@
+[
+  {
+    "name": "AI_PATH",
+    "path": "/api/utility/drawing-plan",
+    "file": "server/drawingAi.ts",
+    "line": 21,
+    "frontendCalls": [],
+    "testFiles": [
+      "tests/utility-ai-server.spec.ts"
+    ]
+  },
+  {
+    "name": "COMPILE_STRUCTURE_PATH",
+    "path": "/api/utility/compile-structure",
+    "file": "server/drawingAi.ts",
+    "line": 22,
+    "frontendCalls": [
+      {
+        "path": "/api/utility/compile-structure",
+        "file": "src/features/utility/PatentStructureFlow.tsx",
+        "line": 236
+      }
+    ],
+    "testFiles": []
+  },
+  {
+    "name": "MATERIALS_V2_PATH",
+    "path": "/api/utility/materials-v2",
+    "file": "server/materialsV2Api.ts",
+    "line": 20,
+    "frontendCalls": [
+      {
+        "path": "/api/utility/materials-v2",
+        "file": "src/features/utility/UtilityWorkspace.tsx",
+        "line": 233
+      }
+    ],
+    "testFiles": []
+  },
+  {
+    "name": "MATERIALS_V2_STATUS_PATH",
+    "path": "/api/utility/materials-v2/status",
+    "file": "server/materialsV2Api.ts",
+    "line": 21,
+    "frontendCalls": [
+      {
+        "path": "/api/utility/materials-v2/status",
+        "file": "src/features/utility/UtilityWorkspace.tsx",
+        "line": 246
+      }
+    ],
+    "testFiles": []
+  },
+  {
+    "name": "NAMING_OPTIONS_PATH",
+    "path": "/api/utility/naming-options",
+    "file": "server/namingAi.ts",
+    "line": 10,
+    "frontendCalls": [
+      {
+        "path": "/api/utility/naming-options",
+        "file": "src/features/utility/UtilityNaming.tsx",
+        "line": 263
+      }
+    ],
+    "testFiles": []
+  },
+  {
+    "name": "NAMING_NAMES_PATH",
+    "path": "/api/utility/naming-names",
+    "file": "server/namingAi.ts",
+    "line": 11,
+    "frontendCalls": [
+      {
+        "path": "/api/utility/naming-names",
+        "file": "src/features/utility/UtilityNaming.tsx",
+        "line": 326
+      }
+    ],
+    "testFiles": []
+  },
+  {
+    "name": "INNOVATION_CANDIDATES_PATH",
+    "path": "/api/utility/innovation-candidates",
+    "file": "server/patentStructureAi.ts",
+    "line": 22,
+    "frontendCalls": [],
+    "testFiles": [
+      "tests/utility-patent-structure.spec.ts"
+    ]
+  },
+  {
+    "name": "STRUCTURE_PLAN_PATH",
+    "path": "/api/utility/structure-plan",
+    "file": "server/patentStructureAi.ts",
+    "line": 23,
+    "frontendCalls": [],
+    "testFiles": []
+  },
+  {
+    "name": "STRUCTURE_DRAFT_PATH",
+    "path": "/api/utility/structure-draft",
+    "file": "server/patentStructureAi.ts",
+    "line": 24,
+    "frontendCalls": [],
+    "testFiles": [
+      "tests/utility-patent-structure.spec.ts"
+    ]
+  },
+  {
+    "name": "STRUCTURE_ANSWERS_PATH",
+    "path": "/api/utility/structure-answers",
+    "file": "server/structureAnswersAi.ts",
+    "line": 10,
+    "frontendCalls": [
+      {
+        "path": "/api/utility/structure-answers",
+        "file": "src/features/utility/PatentStructureFlow.tsx",
+        "line": 259
+      }
+    ],
+    "testFiles": [
+      "tests/utility-patent-structure.spec.ts"
+    ]
+  },
+  {
+    "name": "STRUCTURE_EVIDENCE_PATH",
+    "path": "/api/utility/structure-evidence-options",
+    "file": "server/structureEvidenceAi.ts",
+    "line": 11,
+    "frontendCalls": [
+      {
+        "path": "/api/utility/structure-evidence-options",
+        "file": "src/features/utility/PatentStructureFlow.tsx",
+        "line": 161
+      },
+      {
+        "path": "/api/utility/structure-evidence-options",
+        "file": "src/features/utility/UtilityNaming.tsx",
+        "line": 297
+      }
+    ],
+    "testFiles": [
+      "tests/utility-patent-structure.spec.ts"
+    ]
+  },
+  {
+    "name": "STRUCTURE_SKELETON_PATH",
+    "path": "/api/utility/structure-skeleton",
+    "file": "server/structureSkeletonAi.ts",
+    "line": 15,
+    "frontendCalls": [
+      {
+        "path": "/api/utility/structure-skeleton",
+        "file": "src/features/utility/PatentStructureFlow.tsx",
+        "line": 194
+      }
+    ],
+    "testFiles": [
+      "tests/utility-patent-structure.spec.ts"
+    ]
+  }
+]

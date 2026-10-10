@@ -1,0 +1,69 @@
+{
+  "kind": "synthetic-offline-regression-probes-not-user-output",
+  "externalAiCalls": 0,
+  "invalidProductEvidenceAccepted": true,
+  "invalidProductAnswerAccepted": true,
+  "unrelatedMainComponentAccepted": true,
+  "contradictoryNonGearFactsKept": 2,
+  "separatedCylinderAssemblyIssues": [],
+  "separatedCylinderDraftCompiles": true,
+  "compileErrors": [],
+  "hiddenEdgesDisplayed": false,
+  "renderDiagnostics": {
+    "cylinder": {
+      "parts": [
+        {
+          "name": "圆柱",
+          "visibleEdges": 55,
+          "hiddenEdges": 17
+        }
+      ],
+      "labelIds": [
+        "C01"
+      ]
+    },
+    "tube": {
+      "parts": [
+        {
+          "name": "圆管",
+          "visibleEdges": 91,
+          "hiddenEdges": 53
+        }
+      ],
+      "labelIds": [
+        "C01"
+      ]
+    },
+    "hidden": {
+      "parts": [
+        {
+          "name": "外壳简化体",
+          "visibleEdges": 12,
+          "hiddenEdges": 3
+        },
+        {
+          "name": "内部创新件",
+          "visibleEdges": 0,
+          "hiddenEdges": 68
+        }
+      ],
+      "labelIds": [
+        "C01",
+        "C02"
+      ]
+    }
+  },
+  "conflictingMotionSelectionAccepted": true,
+  "holesAndLProfileDescriptionDoesNotChangeBoxGeometry": true,
+  "retainedPendingEvidence": {
+    "newProductBriefValid": true,
+    "newProduct": "复合无纺布",
+    "oldProductEvidenceShown": true,
+    "freshProductEvidenceShown": false
+  },
+  "regressionTests": {
+    "selectedExistingTests": 25,
+    "passed": 25,
+    "failed": 0
+  }
+}

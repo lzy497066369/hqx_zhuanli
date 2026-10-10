@@ -1,0 +1,102 @@
+{
+  "fixtureSource": "Phase 16E REAL RESPONSE - SANITIZED DIAGNOSTIC EXCERPT",
+  "rawPayloadAvailable": false,
+  "phase": "16E",
+  "classification": "RESEARCH_RECOVERY_PARTIAL",
+  "httpStatus": 200,
+  "response": {
+    "responseType": "response",
+    "responseStatus": "completed",
+    "outputIsArray": true,
+    "outputItemCount": 4,
+    "outputItemTypes": ["reasoning", "web_search_call", "reasoning", "message"],
+    "webSearchCallCount": 1,
+    "webSearchCallTypes": ["web_search_call"],
+    "webSearchCallIdsPresent": [true],
+    "webSearchCallIdLengths": [53],
+    "errorPresent": false,
+    "errorType": null,
+    "errorCode": null,
+    "errors": [],
+    "webSearchCalls": [{
+      "callStatus": "completed",
+      "actionType": "search",
+      "actionQueryPresent": true,
+      "queryPresent": true,
+      "queryLength": 36,
+      "queriesIsArray": true,
+      "queryLengths": [36],
+      "sourcesIsArray": true,
+      "sourceCount": 12,
+      "sourceTypes": ["url", "url", "url", "url", "url", "url", "url", "url", "url", "url", "url", "url"],
+      "sources": [
+        {"hostname": "patents.google.com", "pathname": "/patent/CN220022688U/zh"},
+        {"hostname": "patents.google.com", "pathname": "/patent/CN218183283U/zh"},
+        {"hostname": "patents.google.com", "pathname": "/patent/CN116647177B/zh"},
+        {"hostname": "patents.google.com", "pathname": "/patent/CN217883330U/zh"},
+        {"hostname": "patents.google.com", "pathname": "/patent/CN221748250U/zh"},
+        {"hostname": "patents.google.com", "pathname": "/patent/CN221597793U/zh"},
+        {"hostname": "patents.google.com", "pathname": "/patent/CN115085645B/zh"},
+        {"hostname": "patents.google.com", "pathname": "/patent/CN215186609U/zh"},
+        {"hostname": "patents.google.com", "pathname": "/patent/CN111342757A/zh"},
+        {"hostname": "patents.google.com", "pathname": "/patent/CN203775116U/zh"},
+        {"hostname": "patents.google.com", "pathname": "/patent/CN220273582U/zh"},
+        {"hostname": "patents.google.com", "pathname": "/patent/CN220342266U/zh"}
+      ],
+      "errorPresent": false,
+      "errorType": null,
+      "errorCode": null
+    }]
+  },
+  "observedResearchDiagnostics": {
+    "searchActionCount": 1,
+    "searchResultCount": 12,
+    "qualifiedPatentResultCount": 12,
+    "queryCount": 1,
+    "coveredQueryCount": null
+  },
+  "queryCoverage": {
+    "status": "NOT_IMPLEMENTED_FOR_RESPONSES",
+    "coveredQueryCount": "UNKNOWN"
+  },
+  "stageSnapshots": [
+    {
+      "stage": "search-action",
+      "diagnostics": {
+        "measurement": "OBSERVED_ONLY",
+        "searchActionCount": 1,
+        "searchResultCount": null,
+        "qualifiedPatentResultCount": null,
+        "observedQueryCount": null,
+        "observedCoveredQueryCount": null,
+        "coverageGate": "NOT_RUN"
+      }
+    },
+    {
+      "stage": "search-results",
+      "diagnostics": {
+        "measurement": "OBSERVED_ONLY",
+        "searchActionCount": 1,
+        "searchResultCount": 12,
+        "qualifiedPatentResultCount": 12,
+        "observedQueryCount": null,
+        "observedCoveredQueryCount": null,
+        "coverageGate": "NOT_RUN"
+      }
+    },
+    {
+      "stage": "query-coverage",
+      "diagnostics": {
+        "measurement": "OBSERVED_ONLY",
+        "searchActionCount": 1,
+        "searchResultCount": 12,
+        "qualifiedPatentResultCount": 12,
+        "observedQueryCount": 1,
+        "observedCoveredQueryCount": null,
+        "coverageGate": "NOT_IMPLEMENTED_FOR_RESPONSES"
+      }
+    }
+  ],
+  "stageStop": "query-coverage",
+  "outcome": "TEST_RESPONSES_STAGE_STOP"
+}

@@ -1,0 +1,63 @@
+{
+  "styles": [
+    {
+      "file": "src/App.css",
+      "reachable": true,
+      "selectors": 110,
+      "noLiteralReference": []
+    },
+    {
+      "file": "src/features/invention/invention.css",
+      "reachable": false,
+      "selectors": 12,
+      "noLiteralReference": []
+    },
+    {
+      "file": "src/features/utility/generationProgress.css",
+      "reachable": true,
+      "selectors": 9,
+      "noLiteralReference": []
+    },
+    {
+      "file": "src/features/utility/utility.css",
+      "reachable": true,
+      "selectors": 60,
+      "noLiteralReference": []
+    },
+    {
+      "file": "src/features/utility/workspace.css",
+      "reachable": true,
+      "selectors": 65,
+      "noLiteralReference": [
+        {
+          "name": "uw-copy-panel",
+          "line": 12
+        },
+        {
+          "name": "uw-model-controls",
+          "line": 45
+        }
+      ]
+    },
+    {
+      "file": "src/index.css",
+      "reachable": true,
+      "selectors": 2,
+      "noLiteralReference": []
+    }
+  ],
+  "assets": [
+    {
+      "file": "public/favicon.svg",
+      "bytes": 311,
+      "url": "/favicon.svg",
+      "referencedByApplication": true
+    },
+    {
+      "file": "public/templates/utility-standard.docx",
+      "bytes": 23775,
+      "url": "/templates/utility-standard.docx",
+      "referencedByApplication": false
+    }
+  ]
+}

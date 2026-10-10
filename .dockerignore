@@ -1,0 +1,11 @@
+node_modules
+dist
+playwright-report
+test-results
+artifacts
+.git
+.env.local
+.env
+*.zip
+*.rar
+tmp-diag-*.ts

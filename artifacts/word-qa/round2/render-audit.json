@@ -1,0 +1,237 @@
+{
+  "documents": {
+    "normal": {
+      "pages": 8,
+      "sections": {
+        "说明书摘要": [
+          1
+        ],
+        "摘要附图": [
+          2
+        ],
+        "权利要求书": [
+          3
+        ],
+        "说明书": [
+          4,
+          5
+        ],
+        "说明书附图": [
+          6,
+          7,
+          8
+        ]
+      }
+    },
+    "long": {
+      "pages": 16,
+      "sections": {
+        "说明书摘要": [
+          1,
+          2
+        ],
+        "摘要附图": [
+          3
+        ],
+        "权利要求书": [
+          4,
+          5,
+          6,
+          7
+        ],
+        "说明书": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13
+        ],
+        "说明书附图": [
+          14,
+          15,
+          16
+        ]
+      }
+    },
+    "short": {
+      "pages": 8,
+      "sections": {
+        "说明书摘要": [
+          1
+        ],
+        "摘要附图": [
+          2
+        ],
+        "权利要求书": [
+          3
+        ],
+        "说明书": [
+          4,
+          5
+        ],
+        "说明书附图": [
+          6,
+          7,
+          8
+        ]
+      }
+    },
+    "annotated": {
+      "pages": 8,
+      "sections": {
+        "说明书摘要": [
+          1
+        ],
+        "摘要附图": [
+          2
+        ],
+        "权利要求书": [
+          3
+        ],
+        "说明书": [
+          4,
+          5
+        ],
+        "说明书附图": [
+          6,
+          7,
+          8
+        ]
+      }
+    },
+    "extended": {
+      "pages": 8,
+      "sections": {
+        "说明书摘要": [
+          1
+        ],
+        "摘要附图": [
+          2
+        ],
+        "权利要求书": [
+          3
+        ],
+        "说明书": [
+          4,
+          5
+        ],
+        "说明书附图": [
+          6,
+          7,
+          8
+        ]
+      }
+    }
+  },
+  "identical_pages": [
+    [
+      "/tmp/utility-word-qa/final-render-v2/normal/page-1.png",
+      "/tmp/utility-word-qa/final-render-v2/annotated/page-1.png",
+      "/tmp/utility-word-qa/final-render-v2/extended/page-1.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/normal/page-2.png",
+      "/tmp/utility-word-qa/final-render-v2/short/page-2.png",
+      "/tmp/utility-word-qa/final-render-v2/annotated/page-2.png",
+      "/tmp/utility-word-qa/final-render-v2/extended/page-2.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/normal/page-3.png",
+      "/tmp/utility-word-qa/final-render-v2/short/page-3.png",
+      "/tmp/utility-word-qa/final-render-v2/annotated/page-3.png",
+      "/tmp/utility-word-qa/final-render-v2/extended/page-3.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/normal/page-4.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/normal/page-5.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/normal/page-6.png",
+      "/tmp/utility-word-qa/final-render-v2/short/page-6.png",
+      "/tmp/utility-word-qa/final-render-v2/annotated/page-6.png",
+      "/tmp/utility-word-qa/final-render-v2/extended/page-6.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/normal/page-7.png",
+      "/tmp/utility-word-qa/final-render-v2/short/page-7.png",
+      "/tmp/utility-word-qa/final-render-v2/annotated/page-7.png",
+      "/tmp/utility-word-qa/final-render-v2/extended/page-7.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/normal/page-8.png",
+      "/tmp/utility-word-qa/final-render-v2/short/page-8.png",
+      "/tmp/utility-word-qa/final-render-v2/annotated/page-8.png",
+      "/tmp/utility-word-qa/final-render-v2/extended/page-8.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/long/page-1.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/long/page-2.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/long/page-3.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/long/page-4.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/long/page-5.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/long/page-6.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/long/page-7.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/long/page-8.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/long/page-9.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/long/page-10.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/long/page-11.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/long/page-12.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/long/page-13.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/long/page-14.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/long/page-15.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/long/page-16.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/short/page-1.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/short/page-4.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/short/page-5.png",
+      "/tmp/utility-word-qa/final-render-v2/annotated/page-5.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/annotated/page-4.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/extended/page-4.png"
+    ],
+    [
+      "/tmp/utility-word-qa/final-render-v2/extended/page-5.png"
+    ]
+  ]
+}

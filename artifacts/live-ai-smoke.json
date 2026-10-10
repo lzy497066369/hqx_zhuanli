@@ -1,0 +1,11 @@
+{
+  "status": 200,
+  "model": "gpt-6-astra",
+  "planStatus": "ready",
+  "components": 2,
+  "elapsedMs": 24060,
+  "reloaded": true,
+  "svgDownloaded": true,
+  "errors": [],
+  "syntheticTestOnly": true
+}

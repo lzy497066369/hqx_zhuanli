@@ -1,0 +1,47 @@
+[
+  {
+    "file": "server/materialsV2Api.ts",
+    "removed": [
+      {
+        "name": "JsonResponse",
+        "fromLine": 23
+      },
+      {
+        "name": "JsonRequest",
+        "fromLine": 28
+      },
+      {
+        "name": "ExpressLike",
+        "fromLine": 33
+      },
+      {
+        "name": "readAiConfig",
+        "fromLine": 39
+      },
+      {
+        "name": "registerMaterialsV2Api",
+        "fromLine": 179
+      }
+    ],
+    "deletedLines": 176,
+    "beforeLines": 494,
+    "afterLines": 318
+  },
+  {
+    "file": "server/documentReviewer.ts",
+    "removed": [
+      {
+        "name": "sortIssuesBySeverity",
+        "fromLine": 466
+      }
+    ],
+    "deletedLines": 12,
+    "beforeLines": 495,
+    "afterLines": 483
+  },
+  {
+    "file": "server/structureFallback.ts",
+    "action": "delete-file",
+    "deletedLines": 59
+  }
+]

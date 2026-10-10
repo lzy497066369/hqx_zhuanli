@@ -1,0 +1,22 @@
+[
+  {
+    "kind": "local-api",
+    "stage": "preview",
+    "startedAt": "2026-10-10T00:58:45.291Z",
+    "status": 200,
+    "completedAt": "2026-10-10T00:59:27.550Z"
+  },
+  {
+    "kind": "local-api",
+    "stage": "confirm",
+    "startedAt": "2026-10-10T01:05:39.370Z",
+    "status": 200,
+    "completedAt": "2026-10-10T01:05:39.400Z"
+  },
+  {
+    "kind": "local-api",
+    "stage": "materials",
+    "startedAt": "2026-10-10T01:05:39.407Z",
+    "status": 200
+  }
+]

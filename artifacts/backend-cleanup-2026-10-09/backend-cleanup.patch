@@ -1,0 +1,282 @@
+diff --git "a/C:\\Users\\zyun5\\Desktop\\\347\237\245\345\210\233\345\267\245\345\235\212\\\347\237\245\345\210\233\345\267\245\345\235\212\\artifacts\\backend-cleanup-2026-10-09\\baseline-workspace\\server/documentReviewer.ts" "b/C:\\Users\\zyun5\\Desktop\\\347\237\245\345\210\233\345\267\245\345\235\212\\\347\237\245\345\210\233\345\267\245\345\235\212\\server/documentReviewer.ts"
+index a64dd16..97a76d9 100644
+--- "a/C:\\Users\\zyun5\\Desktop\\\347\237\245\345\210\233\345\267\245\345\235\212\\\347\237\245\345\210\233\345\267\245\345\235\212\\artifacts\\backend-cleanup-2026-10-09\\baseline-workspace\\server/documentReviewer.ts"
++++ "b/C:\\Users\\zyun5\\Desktop\\\347\237\245\345\210\233\345\267\245\345\235\212\\\347\237\245\345\210\233\345\267\245\345\235\212\\server/documentReviewer.ts"
+@@ -460,18 +460,6 @@ function calculateScore(issues: ReviewIssue[]): number {
+   return Math.max(0, score);
+ }
+ 
+-/**
+- * 按严重程度对问题排序
+- */
+-export function sortIssuesBySeverity(issues: ReviewIssue[]): ReviewIssue[] {
+-  const severityOrder = { error: 0, warning: 1, suggestion: 2 };
+-  return [...issues].sort((a, b) => {
+-    const orderDiff = severityOrder[a.severity] - severityOrder[b.severity];
+-    if (orderDiff !== 0) return orderDiff;
+-    return a.field.localeCompare(b.field);
+-  });
+-}
+-
+ /**
+  * 过滤出可自动修复的问题
+  */
+diff --git "a/C:\\Users\\zyun5\\Desktop\\\347\237\245\345\210\233\345\267\245\345\235\212\\\347\237\245\345\210\233\345\267\245\345\235\212\\artifacts\\backend-cleanup-2026-10-09\\baseline-workspace\\server/materialsV2Api.ts" "b/C:\\Users\\zyun5\\Desktop\\\347\237\245\345\210\233\345\267\245\345\235\212\\\347\237\245\345\210\233\345\267\245\345\235\212\\server/materialsV2Api.ts"
+index b13ceb5..f04ccc9 100644
+--- "a/C:\\Users\\zyun5\\Desktop\\\347\237\245\345\210\233\345\267\245\345\235\212\\\347\237\245\345\210\233\345\267\245\345\235\212\\artifacts\\backend-cleanup-2026-10-09\\baseline-workspace\\server/materialsV2Api.ts"
++++ "b/C:\\Users\\zyun5\\Desktop\\\347\237\245\345\210\233\345\267\245\345\235\212\\\347\237\245\345\210\233\345\267\245\345\235\212\\server/materialsV2Api.ts"
+@@ -20,37 +20,6 @@ import { assertGenerationProof } from '../src/features/utility/patentPackage.ts'
+ export const MATERIALS_V2_PATH = '/api/utility/materials-v2';
+ export const MATERIALS_V2_STATUS_PATH = '/api/utility/materials-v2/status';
+ 
+-type JsonResponse = {
+-  status(code: number): JsonResponse;
+-  json(value: unknown): void;
+-};
+-
+-type JsonRequest = {
+-  body: unknown;
+-  params: Record<string, string | undefined>;
+-};
+-
+-type ExpressLike = {
+-  post(path: string, handler: (req: JsonRequest, res: JsonResponse) => void | Promise<void>): void;
+-  get(path: string, handler: (req: JsonRequest, res: JsonResponse) => void | Promise<void>): void;
+-  delete(path: string, handler: (req: JsonRequest, res: JsonResponse) => void | Promise<void>): void;
+-};
+-
+-function readAiConfig(env: Record<string, string | undefined>): AiConfig {
+-  return {
+-    baseUrl: (env.AI_BASE_URL || '').replace(/\/+$/, ''),
+-    apiKey: env.AI_API_KEY || '',
+-    model: env.AI_MODEL || '',
+-    researchModel: env.AI_RESEARCH_MODEL || env.AI_MODEL || '',
+-    fallbackModel: env.AI_FALLBACK_MODEL || '',
+-    fallbackBaseUrl: (env.AI_FALLBACK_BASE_URL || '').replace(/\/+$/, ''),
+-    fallbackApiKey: env.AI_FALLBACK_API_KEY || '',
+-    secondFallbackModel: env.AI_SECOND_FALLBACK_MODEL || '',
+-    secondFallbackBaseUrl: (env.AI_SECOND_FALLBACK_BASE_URL || '').replace(/\/+$/, ''),
+-    secondFallbackApiKey: env.AI_SECOND_FALLBACK_API_KEY || '',
+-  };
+-}
+-
+ // 存储生成任务的状态
+ const generationTasks = new Map<string, {
+   status: 'running' | 'completed' | 'failed';
+@@ -173,151 +142,6 @@ function parseGenerationRequest(body: unknown): { context?: PatentGenerationCont
+   return { context: validated.context, patentType: payload.patentType, options: payload.options as GenerationOptions | undefined };
+ }
+ 
+-/**
+- * 注册API路由
+- */
+-export function registerMaterialsV2Api(app: ExpressLike) {
+-  // 启动生成任务
+-  app.post(MATERIALS_V2_PATH, async (req, res) => {
+-    try {
+-      const parsed = parseGenerationRequest(req.body);
+-      if (!parsed.context) {
+-        res.status(400).json({ error: 'INVALID_INPUT', message: parsed.message || '生成上下文无效' });
+-        return;
+-      }
+-
+-      // 生成任务ID
+-      const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+-
+-      // 初始化任务状态
+-      generationTasks.set(taskId, {
+-        status: 'running',
+-        progress: 0,
+-        message: '开始生成文档...',
+-        startedAt: new Date().toISOString(),
+-      });
+-
+-      // 异步执行生成任务
+-      const config = readAiConfig(process.env);
+-      const controller = new AbortController();
+-
+-      generatePatentDocument(
+-        parsed.context,
+-        config,
+-        controller.signal,
+-        {
+-          ...parsed.options,
+-          onProgress: (progress) => {
+-            const task = generationTasks.get(taskId);
+-            if (task) {
+-              task.progress = progress.progress;
+-              task.message = progress.message;
+-            }
+-          },
+-        }
+-      )
+-        .then((result) => {
+-          const task = generationTasks.get(taskId);
+-          if (task) {
+-            finishTask(task, result, parsed.context!, parsed.patentType!);
+-          }
+-        })
+-        .catch((error) => {
+-          const task = generationTasks.get(taskId);
+-          if (task) {
+-            task.status = 'failed';
+-            task.error = error instanceof Error ? error.message : String(error);
+-            task.message = '文档生成失败';
+-          }
+-        });
+-
+-      // 返回任务ID
+-      res.json({ taskId });
+-    } catch (error) {
+-      console.error('Failed to start document generation:', error);
+-      res.status(500).json({
+-        error: 'GENERATION_FAILED',
+-        message: error instanceof Error ? error.message : '生成任务启动失败',
+-      });
+-    }
+-  });
+-
+-  // 查询生成任务状态
+-  app.get(`${MATERIALS_V2_STATUS_PATH}/:taskId`, (req, res) => {
+-    const { taskId } = req.params;
+-    if (!taskId) {
+-      res.status(400).json({ error: 'INVALID_REQUEST', message: '缺少任务ID' });
+-      return;
+-    }
+-    const task = generationTasks.get(taskId);
+-
+-    if (!task) {
+-      res.status(404).json({ error: 'TASK_NOT_FOUND', message: '任务不存在' });
+-      return;
+-    }
+-
+-    if (task.status === 'completed' && task.result) {
+-      // 返回完整结果
+-      res.json({
+-        status: 'completed',
+-        progress: 100,
+-        message: task.message,
+-        result: task.result,
+-        materials: task.materials,
+-        report: generateValidationReport(task.result),
+-      });
+-    } else if (task.status === 'failed') {
+-      res.json({
+-        status: 'failed',
+-        progress: task.progress,
+-        message: task.message,
+-        error: task.error,
+-      });
+-    } else {
+-      // 返回进度
+-      res.json({
+-        status: 'running',
+-        progress: task.progress,
+-        message: task.message,
+-      });
+-    }
+-  });
+-
+-  // 取消生成任务（预留接口）
+-  app.delete(`${MATERIALS_V2_STATUS_PATH}/:taskId`, (req, res) => {
+-    const { taskId } = req.params;
+-    if (!taskId) {
+-      res.status(400).json({ error: 'INVALID_REQUEST', message: '缺少任务ID' });
+-      return;
+-    }
+-    const task = generationTasks.get(taskId);
+-
+-    if (!task) {
+-      res.status(404).json({ error: 'TASK_NOT_FOUND', message: '任务不存在' });
+-      return;
+-    }
+-
+-    if (task.status === 'running') {
+-      // TODO: 实现取消逻辑（需要保存AbortController）
+-      res.json({ message: '取消功能待实现' });
+-    } else {
+-      res.json({ message: '任务已结束，无需取消' });
+-    }
+-  });
+-
+-  // 清理过期任务（每小时清理一次）
+-  setInterval(() => {
+-    const now = Date.now();
+-    for (const [taskId, task] of generationTasks.entries()) {
+-      const age = now - new Date(task.startedAt).getTime();
+-      // 清理1小时前的任务
+-      if (age > 3600000) {
+-        generationTasks.delete(taskId);
+-      }
+-    }
+-  }, 3600000);
+-}
+-
+ /**
+  * 转换V2文档为V1格式（兼容现有Word导出）
+  */
+diff --git "a/C:\\Users\\zyun5\\Desktop\\\347\237\245\345\210\233\345\267\245\345\235\212\\\347\237\245\345\210\233\345\267\245\345\235\212\\artifacts\\backend-cleanup-2026-10-09\\baseline-workspace\\server/structureFallback.ts" "b/C:\\Users\\zyun5\\Desktop\\\347\237\245\345\210\233\345\267\245\345\235\212\\\347\237\245\345\210\233\345\267\245\345\235\212\\artifacts\\backend-cleanup-2026-10-09\\baseline-workspace\\server/structureFallback.ts"
+deleted file mode 100644
+index 54186f4..0000000
+--- "a/C:\\Users\\zyun5\\Desktop\\\347\237\245\345\210\233\345\267\245\345\235\212\\\347\237\245\345\210\233\345\267\245\345\235\212\\artifacts\\backend-cleanup-2026-10-09\\baseline-workspace\\server/structureFallback.ts"
++++ /dev/null
+@@ -1,59 +0,0 @@
+-import type { InnovationNameCandidate, ProductBrief } from '../src/features/utility/patentStructure.ts';
+-import type { StructureDraft } from '../src/features/utility/structureDraft.ts';
+-
+-const clean = (value: string, fallback: string) => {
+-  const text = value.trim().slice(0, 36);
+-  return text || fallback;
+-};
+-
+-function uniqueName(value: string, fallback: string, used: Set<string>) {
+-  const base = clean(value, fallback);
+-  let name = base;
+-  let serial = 2;
+-  while (used.has(name)) name = `${base}${serial++}`;
+-  used.add(name);
+-  return name;
+-}
+-
+-/**
+- * Deterministic last-resort skeleton. It is deliberately simple and explicit:
+- * the same compiler and model validator still decide whether it is usable.
+- */
+-export function buildFallbackStructureDraft(brief: ProductBrief, candidate: InnovationNameCandidate): StructureDraft {
+-  const used = new Set<string>();
+-  const productSubject = /光伏板|光伏组件|电池板/u.test(brief.productName)
+-    ? candidate.mainComponents.find(name => /光伏板|光伏组件|电池板|板体/u.test(name)) || `${brief.productName}主体`
+-    : candidate.mainComponents[0] || `${brief.productName}主体`;
+-  const first = uniqueName(productSubject, `${brief.productName}主体`, used);
+-  const second = uniqueName(candidate.mainComponents[1] || '连接支撑件', '连接支撑件', used);
+-  const innovation = uniqueName('创新结构组件', '创新结构组件', used);
+-  const problemSolved = clean(candidate.solvedProblem, `改善${brief.productName}的结构使用问题`);
+-  const innovationPoint = clean(candidate.coreInnovationStructure || candidate.innovationDirection, '通过新增结构组件改善产品功能');
+-  const workingPrinciple = `${first}作为主体承载结构，${second}与其固定连接并支撑${innovation}；${innovation}依据“${innovationPoint}”实现相应功能。`;
+-
+-  return {
+-    version: 1,
+-    title: candidate.name,
+-    technicalField: `本实用新型涉及${brief.productName}的结构装配技术领域。`,
+-    baseStructure: `${first}、${second}和${innovation}依次装配形成主体结构，${innovation}设置在${second}的作用位置。`,
+-    components: [
+-      { id: 'D01', name: first, kind: 'base', purpose: '构成产品从外部可见的主体', position: '整体结构中心的主体位置', whyNeeded: '用于明确产品主体并承载其余部件', visualFeature: /光伏板|光伏组件|电池板|板体/u.test(first) ? '长方形薄板，正面为板面主体' : '产品主体的外部可见轮廓', geometry: { shape: 'box', position: [-80, -40, 0], size: [160, 80, 20], rotation: [0, 0, 0] } },
+-      { id: 'D02', name: second, kind: 'base', purpose: '连接并支撑功能部件', position: '主体结构的连接位置', whyNeeded: '用于建立主体与创新结构之间的安装关系', visualFeature: '位于主体边缘或背面的连接支撑件轮廓', geometry: { shape: 'box', position: [-40, -20, 20], size: [80, 40, 60], rotation: [0, 0, 0] } },
+-      { id: 'D03', name: innovation, kind: 'innovation', purpose: '实现确认名称对应的结构功能', position: '连接支撑件的作用位置', whyNeeded: `用于解决${problemSolved}`, visualFeature: '与主体连接的创新结构轮廓', geometry: { shape: 'box', position: [-30, -15, 80], size: [60, 30, 20], rotation: [0, 0, 0] } },
+-    ],
+-    relationships: [
+-      { id: 'R01', from: 'D01', to: 'D02', relation: 'fixed_to', description: `${second}固定连接在${first}上。` },
+-      { id: 'R02', from: 'D02', to: 'D03', relation: 'connected_to', description: `${innovation}连接在${second}上。` },
+-    ],
+-    motions: [
+-      { id: 'M01', componentId: 'D01', type: 'static', path: '固定于主体安装位置', purpose: '保持整体结构稳定' },
+-      { id: 'M02', componentId: 'D02', type: 'static', path: '固定于主体结构上', purpose: '保持连接和支撑关系' },
+-      { id: 'M03', componentId: 'D03', type: 'static', path: '固定于连接支撑件上', purpose: '保持创新结构的作用位置' },
+-    ],
+-    innovationPoints: [innovationPoint],
+-    problemSolved,
+-    workingPrinciple,
+-    nextDraftNumber: 4,
+-    nextModelNumber: 1,
+-  };
+-}

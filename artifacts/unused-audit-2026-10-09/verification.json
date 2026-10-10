@@ -1,0 +1,46 @@
+{
+  "sourceIntegrity": {
+    "checkedFiles": 70,
+    "changedFiles": []
+  },
+  "typescript": {
+    "command": "node node_modules/typescript/bin/tsc -p tsconfig.app.json --noEmit",
+    "exitCode": 0
+  },
+  "browser": {
+    "auditTestPassed": true,
+    "checks": {
+      "currentInventionUsesUtilityNaming": true,
+      "orphanComponentNotRequested": true,
+      "orphanCssClassesAbsent": true,
+      "noPageErrors": true,
+      "pageErrors": []
+    },
+    "requests": [
+      "POST /api/utility/naming-options",
+      "POST /api/utility/structure-evidence-options",
+      "POST /api/utility/naming-names",
+      "POST /api/utility/structure-skeleton",
+      "POST /api/utility/compile-structure"
+    ],
+    "blocked": [],
+    "screenshots": [
+      "01-frontend-entry-map.png",
+      "02-current-invention.png",
+      "03-orphan-invention.png",
+      "04-naming-location.png",
+      "05-drawing-location.png",
+      "06-materials-location.png"
+    ]
+  },
+  "networkPolicy": {
+    "mockedEndpoints": [
+      "/api/utility/naming-options",
+      "/api/utility/naming-names",
+      "/api/utility/structure-evidence-options",
+      "/api/utility/structure-skeleton"
+    ],
+    "allowedRealApi": "/api/utility/compile-structure",
+    "externalAiCalls": 0
+  }
+}

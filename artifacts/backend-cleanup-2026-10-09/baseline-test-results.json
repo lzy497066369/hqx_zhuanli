@@ -1,0 +1,153 @@
+{
+  "config": {
+    "argv": [
+      "C:\\Program Files\\nodejs\\node.exe",
+      "C:\\Users\\zyun5\\Desktop\\知创工坊\\知创工坊\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "-c",
+      "artifacts/backend-cleanup-2026-10-09/playwright.baseline.config.ts",
+      "--grep",
+      "产品方案接口集成"
+    ],
+    "configFile": "C:\\Users\\zyun5\\Desktop\\知创工坊\\知创工坊\\artifacts\\backend-cleanup-2026-10-09\\playwright.baseline.config.ts",
+    "rootDir": "C:/Users/zyun5/Desktop/知创工坊/知创工坊/artifacts/backend-cleanup-2026-10-09/baseline-workspace/tests",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/zyun5/Desktop/知创工坊/知创工坊/artifacts/backend-cleanup-2026-10-09/baseline-test-output",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "",
+        "name": "",
+        "testDir": "C:/Users/zyun5/Desktop/知创工坊/知创工坊/artifacts/backend-cleanup-2026-10-09/baseline-workspace/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "utility-ai-server.spec.ts"
+        ],
+        "timeout": 60000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "./artifacts/backend-cleanup-2026-10-09/baseline-test-results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.63.0",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "utility-ai-server.spec.ts",
+      "file": "utility-ai-server.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "产品方案接口集成：名称独立生成、白名单保留模式、忽略伪造检索和企业字段",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 32,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m200\u001b[39m\nReceived: \u001b[31m502\u001b[39m",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m200\u001b[39m\nReceived: \u001b[31m502\u001b[39m\n    at captured.push.url.url (C:\\Users\\zyun5\\Desktop\\知创工坊\\知创工坊\\artifacts\\backend-cleanup-2026-10-09\\baseline-workspace\\tests\\utility-ai-server.spec.ts:175:29)\n    at withApi (C:\\Users\\zyun5\\Desktop\\知创工坊\\知创工坊\\artifacts\\backend-cleanup-2026-10-09\\baseline-workspace\\tests\\utility-ai-server.spec.ts:22:9)\n    at C:\\Users\\zyun5\\Desktop\\知创工坊\\知创工坊\\artifacts\\backend-cleanup-2026-10-09\\baseline-workspace\\tests\\utility-ai-server.spec.ts:173:3",
+                    "location": {
+                      "file": "C:\\Users\\zyun5\\Desktop\\知创工坊\\知创工坊\\artifacts\\backend-cleanup-2026-10-09\\baseline-workspace\\tests\\utility-ai-server.spec.ts",
+                      "column": 29,
+                      "line": 175
+                    },
+                    "snippet": "  173 |   await withApi(async base => {\n  174 |     const response = await post(base, { ...titleOnly, research: { summary: '伪造研究' }, company: '不能发送的企业', model: '不能替换的模型' });\n> 175 |     expect(response.status).toBe(200);\n      |                             ^\n  176 |     const result = await response.json();\n  177 |     expect(result.source).toBe(planSource(titleOnly));\n  178 |     expect(result.plan.concept).toEqual(concept);"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "C:\\Users\\zyun5\\Desktop\\知创工坊\\知创工坊\\artifacts\\backend-cleanup-2026-10-09\\baseline-workspace\\tests\\utility-ai-server.spec.ts",
+                        "column": 29,
+                        "line": 175
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m200\u001b[39m\nReceived: \u001b[31m502\u001b[39m\n\n  173 |   await withApi(async base => {\n  174 |     const response = await post(base, { ...titleOnly, research: { summary: '伪造研究' }, company: '不能发送的企业', model: '不能替换的模型' });\n> 175 |     expect(response.status).toBe(200);\n      |                             ^\n  176 |     const result = await response.json();\n  177 |     expect(result.source).toBe(planSource(titleOnly));\n  178 |     expect(result.plan.concept).toEqual(concept);\n    at captured.push.url.url (C:\\Users\\zyun5\\Desktop\\知创工坊\\知创工坊\\artifacts\\backend-cleanup-2026-10-09\\baseline-workspace\\tests\\utility-ai-server.spec.ts:175:29)\n    at withApi (C:\\Users\\zyun5\\Desktop\\知创工坊\\知创工坊\\artifacts\\backend-cleanup-2026-10-09\\baseline-workspace\\tests\\utility-ai-server.spec.ts:22:9)\n    at C:\\Users\\zyun5\\Desktop\\知创工坊\\知创工坊\\artifacts\\backend-cleanup-2026-10-09\\baseline-workspace\\tests\\utility-ai-server.spec.ts:173:3"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-09T08:22:51.816Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "C:\\Users\\zyun5\\Desktop\\知创工坊\\知创工坊\\artifacts\\backend-cleanup-2026-10-09\\baseline-test-output\\utility-ai-server-产品方案接口集成：名称独立生成、白名单保留模式、忽略伪造检索和企业字段\\error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "C:\\Users\\zyun5\\Desktop\\知创工坊\\知创工坊\\artifacts\\backend-cleanup-2026-10-09\\baseline-workspace\\tests\\utility-ai-server.spec.ts",
+                    "column": 29,
+                    "line": 175
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "866f47169ff2c7e3825c-b2c716d81118341d232e",
+          "file": "utility-ai-server.spec.ts",
+          "line": 170,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-09T08:22:50.460Z",
+    "duration": 1444.997,
+    "expected": 0,
+    "skipped": 0,
+    "unexpected": 1,
+    "flaky": 0
+  }
+}

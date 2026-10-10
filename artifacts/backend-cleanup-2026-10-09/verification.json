@@ -1,0 +1,85 @@
+{
+  "date": "2026-10-09",
+  "changedSourceFiles": [
+    "server/documentReviewer.ts",
+    "server/materialsV2Api.ts",
+    "server/structureFallback.ts"
+  ],
+  "frontendChangedFiles": [],
+  "removedLines": 247,
+  "keptBackendStatementsUnchanged": true,
+  "baselineMatchesBeforeHashes": true,
+  "typescript": "passed",
+  "backendLint": "passed",
+  "productionBuild": "passed",
+  "productionBuildWarning": "Bundle exceeds 500 kB; no build errors.",
+  "testStats": {
+    "startTime": "2026-10-09T08:18:30.765Z",
+    "duration": 2379.6549999999997,
+    "expected": 38,
+    "skipped": 0,
+    "unexpected": 1,
+    "flaky": 0
+  },
+  "baselineTestStats": {
+    "startTime": "2026-10-09T08:22:50.460Z",
+    "duration": 1444.997,
+    "expected": 0,
+    "skipped": 0,
+    "unexpected": 1,
+    "flaky": 0
+  },
+  "existingFailures": [
+    {
+      "title": "产品方案接口集成：名称独立生成、白名单保留模式、忽略伪造检索和企业字段",
+      "line": 170,
+      "errors": [
+        "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m200\u001b[39m\nReceived: \u001b[31m502\u001b[39m\n\n  173 |   await withApi(async base => {\n  174 |     const response = await post(base, { ...titleOnly, research: { summary: '伪造研究' }, company: '不能发送的企业', model: '不能替换的模型' });\n> 175 |     expect(response.status).toBe(200);\n      |                             ^\n  176 |     const result = await response.json();\n  177 |     expect(result.source).toBe(planSource(titleOnly));\n  178 |     expect(result.plan.concept).toEqual(concept);\n    at captured.push.url.url (C:\\Users\\zyun5\\Desktop\\知创工坊\\知创工坊\\tests\\utility-ai-server.spec.ts:175:29)\n    at withApi (C:\\Users\\zyun5\\Desktop\\知创工坊\\知创工坊\\tests\\utility-ai-server.spec.ts:22:9)\n    at C:\\Users\\zyun5\\Desktop\\知创工坊\\知创工坊\\tests\\utility-ai-server.spec.ts:173:3"
+      ]
+    }
+  ],
+  "baselineFailureTitles": [
+    "产品方案接口集成：名称独立生成、白名单保留模式、忽略伪造检索和企业字段"
+  ],
+  "remainingZeroReferenceBackendExports": [],
+  "remainingUnreachableBackendModules": [],
+  "networkGuards": [
+    {
+      "guardInstalled": true,
+      "localConnections": 0,
+      "blockedAttempts": 0,
+      "externalAiRequests": 0
+    },
+    {
+      "guardInstalled": true,
+      "localConnections": 1,
+      "blockedAttempts": 0,
+      "externalAiRequests": 0
+    },
+    {
+      "guardInstalled": true,
+      "localConnections": 0,
+      "blockedAttempts": 0,
+      "externalAiRequests": 0
+    },
+    {
+      "guardInstalled": true,
+      "localConnections": 0,
+      "blockedAttempts": 0,
+      "externalAiRequests": 0
+    },
+    {
+      "guardInstalled": true,
+      "localConnections": 0,
+      "blockedAttempts": 0,
+      "externalAiRequests": 0
+    },
+    {
+      "guardInstalled": true,
+      "localConnections": 8,
+      "blockedAttempts": 0,
+      "externalAiRequests": 0
+    }
+  ],
+  "backup": "backend-before-cleanup.zip"
+}

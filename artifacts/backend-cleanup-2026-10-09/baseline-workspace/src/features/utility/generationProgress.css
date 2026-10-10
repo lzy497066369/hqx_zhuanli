@@ -1,0 +1,19 @@
+.generation-progress { margin: 16px 0; padding: 16px; border: 1px solid #c8ded1; border-radius: 8px; background: #fff; color: #29483a; min-width: 0; }
+.generation-progress-heading { display: grid; gap: 5px; font-size: 13px; }
+.generation-progress-heading span { color: #53675b; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.generation-progress-track { height: 8px; margin: 13px 0 14px; overflow: hidden; border-radius: 8px; background: #e6efe9; }
+.generation-progress-track span { display: block; width: 35%; height: 100%; background: #347c5a; animation: generation-progress-wait 1.7s ease-in-out infinite alternate; }
+.generation-progress-steps { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.generation-progress-steps li { display: flex; align-items: flex-start; gap: 9px; min-width: 0; font-size: 12px; line-height: 1.5; }
+.generation-progress-steps li svg { flex: 0 0 auto; margin-top: 2px; }
+.generation-progress-steps li > span { min-width: 0; overflow-wrap: anywhere; }
+.generation-progress-steps strong { display: block; font-size: 12px; }
+.generation-progress-steps small { display: block; color: #576e60; font-size: 11px; }
+.generation-progress-steps li.active { color: #246c54; }
+.generation-progress-steps li.complete { color: #427656; }
+.generation-progress-steps li.pending { color: #67786e; }
+.generation-progress-note { margin: 12px 0 0; color: #53675b; font-size: 11px; line-height: 1.6; }
+.generation-progress-spinner { animation: generation-progress-spin 900ms linear infinite; }
+@keyframes generation-progress-spin { to { transform: rotate(360deg); } }
+@keyframes generation-progress-wait { to { transform: translateX(185%); } }
+@media (prefers-reduced-motion: reduce) { .generation-progress-track span, .generation-progress-spinner { animation: none; } }

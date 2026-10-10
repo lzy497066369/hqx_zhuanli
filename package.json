@@ -1,0 +1,34 @@
+{
+  "name": "zhichuang-workshop",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "start": "node --experimental-strip-types --env-file-if-exists=.env.local server/index.ts",
+    "test:product": "playwright test --config playwright.product.config.ts",
+    "test:product:live": "node --experimental-strip-types --env-file-if-exists=.env.local tests/support/productWorkflowLive.mjs"
+  },
+  "dependencies": {
+    "docx": "^9.7.1",
+    "lucide-react": "^1.47.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "oxlint": "^1.81.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0"
+  }
+}

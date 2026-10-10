@@ -1,0 +1,82 @@
+{
+  "date": "2026-10-09",
+  "sourceFiles": 64,
+  "zeroReferenceExports": 12,
+  "frontendZeroReferenceExports": 9,
+  "backendZeroReferenceExports": 3,
+  "unreachableWholeModules": [
+    "src/features/invention/InventionWorkspace.tsx",
+    "server/structureFallback.ts"
+  ],
+  "unreachableWholeCss": [
+    "src/features/invention/invention.css"
+  ],
+  "unusedCssClassGroups": [
+    {
+      "name": "uw-copy-panel",
+      "line": 12,
+      "file": "src/features/utility/workspace.css"
+    },
+    {
+      "name": "uw-model-controls",
+      "line": 45,
+      "file": "src/features/utility/workspace.css"
+    }
+  ],
+  "unreferencedPublicAssets": [
+    {
+      "file": "public/templates/utility-standard.docx",
+      "bytes": 23775,
+      "url": "/templates/utility-standard.docx",
+      "referencedByApplication": false
+    }
+  ],
+  "testOrLegacyOnlySymbols": [
+    {
+      "name": "makeUtilityMaterials",
+      "file": "src/data.ts",
+      "line": 254
+    },
+    {
+      "name": "defaultUtilityParts",
+      "file": "src/data.ts",
+      "line": 184
+    },
+    {
+      "name": "isDrawingCurrent",
+      "file": "src/features/utility/contentDrawing.ts",
+      "line": 112
+    },
+    {
+      "name": "buildPatentStructureModel",
+      "file": "src/features/utility/patentStructure.ts",
+      "line": 233
+    },
+    {
+      "name": "nextDraftComponent",
+      "file": "src/features/utility/structureDraft.ts",
+      "line": 60
+    },
+    {
+      "name": "makeInventionMaterials",
+      "file": "src/features/invention/invention.ts",
+      "line": 58
+    },
+    {
+      "name": "selectParentClaim",
+      "file": "src/features/utility/claimDependencies.ts",
+      "line": 8
+    }
+  ],
+  "registeredRoutesWithoutCurrentFrontendCalls": [
+    "/api/utility/drawing-plan",
+    "/api/utility/innovation-candidates",
+    "/api/utility/structure-plan",
+    "/api/utility/structure-draft"
+  ],
+  "sourceIntegrity": {
+    "checkedFiles": 70,
+    "changedFiles": []
+  },
+  "report": "artifacts/unused-audit-2026-10-09/report.md"
+}

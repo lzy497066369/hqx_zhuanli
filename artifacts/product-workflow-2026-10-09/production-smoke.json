@@ -1,0 +1,8 @@
+{
+  "productionStartup": true,
+  "frontendServed": true,
+  "productRouteRegistered": true,
+  "envNotServed": true,
+  "clientAssetsContainNoKeys": true,
+  "port": 52211
+}

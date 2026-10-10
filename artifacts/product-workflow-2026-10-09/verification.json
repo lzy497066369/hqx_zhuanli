@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-09",
+  "timezone": "Asia/Hong_Kong",
+  "implementation": "product-workflow-v2",
+  "verification": {
+    "build": "passed",
+    "lint": "passed with one pre-existing Fast Refresh warning",
+    "productTests": {
+      "passed": 25,
+      "failed": 0,
+      "realImageProvider": false
+    },
+    "selectedRegressionTests": {
+      "passed": 65,
+      "failed": 0
+    },
+    "allLegacyUiTestsRun": false,
+    "production": {
+      "productionStartup": true,
+      "frontendServed": true,
+      "productRouteRegistered": true,
+      "envNotServed": true,
+      "clientAssetsContainNoKeys": true,
+      "port": 52211
+    }
+  },
+  "realProvider": {
+    "logicalReview": "passed",
+    "detailedBrief": "passed",
+    "preview": "blocked",
+    "patentFigure": "not generated",
+    "finalMaterials": "not generated",
+    "imageGroupStatus": 403,
+    "reason": "Image generation is not enabled for this group",
+    "requiredAction": "Enable image generation for the API-key group and confirm the allowed image model."
+  },
+  "word": {
+    "docxPackageAndImageEmbedding": "passed using synthetic test images",
+    "strictBlackWhitePixels": "passed",
+    "externalPageRendering": "not verified; LibreOffice soffice.exe is not installed"
+  },
+  "secretHandling": "Server-only .env.local; production does not serve it; actual server keys were not found in client assets."
+}

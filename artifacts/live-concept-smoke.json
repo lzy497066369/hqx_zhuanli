@@ -1,0 +1,34 @@
+{
+  "date": "2026-09-22T09:46:01.837Z",
+  "liveRun": {
+    "http": 200,
+    "elapsedToResponseMs": 126850,
+    "titleOnly": true,
+    "structureInput": "",
+    "principleInput": "",
+    "geometryInput": "",
+    "model": "gpt-6-astra",
+    "sourceCount": 3,
+    "publications": [
+      "CN219263498U",
+      "CN202140711U",
+      "CN221196432U"
+    ],
+    "partCount": 7,
+    "adoption": true,
+    "threeViews": true,
+    "svgExport": true,
+    "saveReload": true,
+    "generatedStructureSaved": true,
+    "principleAndSourceInMaterials": true,
+    "pageErrors": [],
+    "harnessIssue": "Final screenshot step used an incorrect tab label; all live business checks before it passed."
+  },
+  "replay": {
+    "note": "Reused saved real response without a new paid request; corrected tab label for final screenshot.",
+    "saveReload": true,
+    "materials": true,
+    "finalScreenshot": true,
+    "pageErrors": []
+  }
+}

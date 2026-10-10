@@ -1,0 +1,28 @@
+services:
+  zhichuang:
+    build: .
+    image: zhichuang-workshop:latest
+    container_name: zhichuang-workshop
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4173:4173"
+    # 密钥只放在宿主机的 .env.local，不进镜像、不进仓库。
+    env_file:
+      - .env.local
+    environment:
+      HOST: 0.0.0.0
+      PORT: 4173
+      # 浏览器访问用的站点来源；经反向代理 HTTPS 发布时改成 https://你的域名
+      ALLOWED_ORIGINS: http://127.0.0.1:4173,http://localhost:4173
+      FREECAD_CMD: /usr/bin/freecadcmd
+      FREECAD_TIMEOUT_MS: "300000"
+    # FreeCAD 建模与网格投影吃内存，给出保底上限；并发上限由服务端自身限制（同时 3 个任务）。
+    deploy:
+      resources:
+        limits:
+          memory: 3g
+    tmpfs:
+      - /tmp:size=1g
+    read_only: false
+    security_opt:
+      - no-new-privileges:true
