@@ -1,3 +1,5 @@
+# 目录名是中文时 compose 推不出项目名，这里固定。
+name: zhichuang
 services:
   zhichuang:
     build: .
