@@ -48,10 +48,12 @@ export type ProjectionOptions = {
   labels?: FigureLabel[];
   /** 按网格的 parts 自动标号：引出线落在该部件在本视角可见区域的中心，被完全遮住的部件不标。 */
   partLabels?: boolean;
+  /** 无视面积阈值也要标出的部件（用于保证每个部件至少在一张图里出现）。 */
+  forceLabelParts?: string[];
   /** 关键结构圈选：细实线圆圈叠加在结构上，并以引出线连接字母 A。 */
   keyCircle?: KeyCircle;
 };
-export type ProjectionResult = { svg: string; width: number; height: number; visibleSegments: number; featureEdges: number; labelCount: number; labelledParts: string[] };
+export type ProjectionResult = { svg: string; width: number; height: number; visibleSegments: number; featureEdges: number; labelCount: number; labelledParts: string[]; partAreas: Record<string, number> };
 const escapeXml = (text: string) => text.replace(/[<>&"]/g, character => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[character]!);
 
 /** 正交投影 + 深度缓冲隐藏线消除；同一份网格的不同视角共用这一个实现。 */
@@ -262,6 +264,7 @@ export function renderMeshView(mesh: Mesh, options: ProjectionOptions): Projecti
   };
   let labelCount = 0;
   const labelledParts: string[] = [];
+  const partAreas: Record<string, number> = {};
   for (const item of options.labels || []) {
     place(item.text, toPixel(snap(item.point)));
     labelCount += 1;
@@ -281,9 +284,12 @@ export function renderMeshView(mesh: Mesh, options: ProjectionOptions): Projecti
         if (score > slots[index].score) slots[index] = { x, y, score };
       }
     }
-    const minimumArea = fontSize * fontSize * .6;
+    for (const [index, id] of partIds.entries()) partAreas[id] = counts[index];
+    // 小零件（销轴、铰链）也要能标：阈值降到约 0.15 个字高面积；forceLabelParts 里的部件只要可见就标。
+    const minimumArea = fontSize * fontSize * .15;
+    const forced = new Set(options.forceLabelParts || []);
     for (const [index, id] of partIds.entries()) {
-      if (counts[index] < minimumArea) continue;
+      if (!counts[index] || (counts[index] < minimumArea && !forced.has(id))) continue;
       let best: { anchor: [number, number]; direction: [number, number]; cost: number } | undefined;
       for (const [slot, direction] of DIRECTIONS.entries()) {
         const extreme = extremes[index][slot];
@@ -322,5 +328,5 @@ export function renderMeshView(mesh: Mesh, options: ProjectionOptions): Projecti
     (annotations.length ? `<g fill="none" stroke="#000000" stroke-width="1.2" stroke-linecap="round" font-family="'Times New Roman', 'SimSun', serif" font-size="${fontSize}" text-anchor="middle">` +
       annotations.map(item => item.startsWith('<text') ? item.replace('<text ', '<text fill="#000000" stroke="none" ') : item).join('') + '</g>' : '') +
     '</svg>';
-  return { svg, width, height, visibleSegments, featureEdges: edges.length, labelCount, labelledParts };
+  return { svg, width, height, visibleSegments, featureEdges: edges.length, labelCount, labelledParts, partAreas };
 }

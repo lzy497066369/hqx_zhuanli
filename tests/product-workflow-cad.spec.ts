@@ -59,6 +59,15 @@ test('网格投影：隐藏线消除后每个视角只剩可见轮廓，输出�
   const annotated = renderCadViews(testAssemblyMesh, '测试', { point: [60, 30, 45], radius: 24 });
   expect(annotated.filter(view => view.svg.includes('<circle')).map(view => view.view)).toEqual(['iso']);
   expect(annotated.every(view => view.svg.includes('>1<') && view.svg.includes('>2<'))).toBe(true);
+  // 很小的零件（1 毫米销钉）在各视角都低于阈值，也必须至少在一张图里被标到。
+  const pin = { vertices: [[60, 30, 60], [61, 30, 60], [61, 31, 60], [60, 31, 60], [60, 30, 61], [61, 30, 61], [61, 31, 61], [60, 31, 61]] as [number, number, number][],
+    triangles: testMesh.triangles.map(triangle => triangle.map(index => index + 16) as [number, number, number]), parts: Array<string>(12).fill('3') };
+  const withPin = { vertices: [...testAssemblyMesh.vertices, ...pin.vertices], triangles: [...testAssemblyMesh.triangles, ...pin.triangles], parts: [...testAssemblyMesh.parts!, ...pin.parts] };
+  expect(renderCadViews(withPin, '测试').some(view => view.svg.includes('>3<'))).toBe(true);
+  // 立体图从正面（-Y 侧）看：正面有、背面没有的零件应出现在立体图里。
+  const frontOnly = { ...testMesh, vertices: testMesh.vertices.map(vertex => [vertex[0], vertex[1] - 100, vertex[2]] as [number, number, number]) };
+  const frontIso = renderMeshView(frontOnly, { direction: [1, -0.75, 0.55], partLabels: true });
+  expect(frontIso.labelledParts).toEqual(['1']);
 });
 test('FreeCAD 命令行：脚本在隔离目录执行，失败和超时不产出附图', async () => {
   const command = await resolveFreeCad(productConfig);

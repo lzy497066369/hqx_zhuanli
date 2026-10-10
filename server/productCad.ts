@@ -236,11 +236,23 @@ export async function runFreeCad(script: string, command: string, options: { tim
   }
 }
 
-/** 同一份网格投影出全部附图视角；部件标号按网格的部件归属自动落在各视角的可见区域，A 圈选只画在立体图。 */
+/** 同一份网格投影出全部附图视角；部件标号按网格的部件归属自动落在各视角的可见区域，A 圈选只画在立体图。
+ *  任何部件都至少要在一张图里被标到：某部件在所有视角都因面积太小被略过时，在它可见面积最大的视角里强制标出。 */
 export function renderCadViews(mesh: Mesh, label: string, keyStructure?: { point: [number, number, number]; radius: number }): CadViewDrawing[] {
-  return CAD_VIEWS.map(view => {
-    const drawing = renderMeshView(mesh, { direction: [...view.direction] as [number, number, number], up: view.id === 'top' ? [0, 1, 0] : [0, 0, 1], label: `${label}${view.title}`,
-      partLabels: true, keyCircle: view.id === 'iso' ? keyStructure : undefined });
+  const render = (view: (typeof CAD_VIEWS)[number], forceLabelParts?: string[]) => renderMeshView(mesh, {
+    direction: [...view.direction] as [number, number, number], up: view.id === 'top' ? [0, 1, 0] : [0, 0, 1], label: `${label}${view.title}`,
+    partLabels: true, forceLabelParts, keyCircle: view.id === 'iso' ? keyStructure : undefined });
+  const drawings = CAD_VIEWS.map(view => ({ view, drawing: render(view) }));
+  const partIds = [...new Set(mesh.parts || [])];
+  const unlabelled = partIds.filter(id => !drawings.some(item => item.drawing.labelledParts.includes(id)));
+  const forcedByView = new Map<string, string[]>();
+  for (const id of unlabelled) {
+    const best = drawings.reduce((chosen, item) => (item.drawing.partAreas[id] || 0) > (chosen?.drawing.partAreas[id] || 0) ? item : chosen, undefined as (typeof drawings)[number] | undefined);
+    if (best && (best.drawing.partAreas[id] || 0) > 0) forcedByView.set(best.view.id, [...(forcedByView.get(best.view.id) || []), id]);
+  }
+  return drawings.map(({ view, drawing: first }) => {
+    const forced = forcedByView.get(view.id);
+    const drawing = forced ? render(view, forced) : first;
     if (!drawing.visibleSegments) throw new AiFailure(502, 'CAD_VIEW_EMPTY', `${view.title}没有可见轮廓，模型可能退化为平面或尺寸异常。`);
     return { view: view.id, title: view.title, svg: drawing.svg, width: drawing.width, height: drawing.height, digest: createHash('sha256').update(drawing.svg).digest('hex') };
   });

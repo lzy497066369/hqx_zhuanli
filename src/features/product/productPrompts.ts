@@ -48,7 +48,8 @@ export const PATENT_FIGURE_TEMPLATES = [{ id: 'patent-structure', title: '产品
 
 /** 说明书附图来源登记表。id 由服务端固定映射到标题，客户端只能提交这里的 id，不能自定义图名。 */
 export const CAD_VIEWS = [
-  { id: 'iso', title: '立体图', direction: [1, 0.75, 0.55] },
+  // 立体图从产品正面（-Y 侧）右上方观察，与前视图看到的是同一面；之前从 +Y 侧看会得到背面。
+  { id: 'iso', title: '立体图', direction: [1, -0.75, 0.55] },
   { id: 'front', title: '前视图', direction: [0, -1, 0] },
   { id: 'top', title: '俯视图', direction: [0, 0, 1] },
   { id: 'right', title: '右视图', direction: [1, 0, 0] },
