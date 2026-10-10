@@ -8,6 +8,9 @@
 npm install
 npm run dev -- --host 127.0.0.1
 ```
+Docker启动
+配置好env文件之后
+docker compose up -d --build
 
 打开终端中显示的本地地址（默认端口 5173）。构建与本地生产预览：
 
