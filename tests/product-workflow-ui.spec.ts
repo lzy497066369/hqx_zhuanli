@@ -219,3 +219,36 @@ test('恢复未确认的旧预览必须清空新版的确认、文案和澄清�
   const restored = await storedWorkflow(page);
   expect(restored?.confirmation).toBeUndefined(); expect(restored?.materials).toBeUndefined(); expect(restored?.revision).toBeUndefined(); expect(restored?.cad).toBeUndefined(); expect(restored?.figures).toEqual({});
 });
+
+// 局域网 http://192.168.x.x 访问时浏览器处于「非安全上下文」：crypto.randomUUID 与 crypto.subtle 都是 undefined。
+// 这里在 localhost 上模拟该环境，保证保存名称、确认预览和 Word 导出不依赖这两个 API。
+async function simulateInsecureContext(page: Page) {
+  await page.addInitScript(() => {
+    delete (Crypto.prototype as { randomUUID?: unknown }).randomUUID;
+    Object.defineProperty(crypto, 'subtle', { value: undefined, configurable: true });
+  });
+}
+test('非安全上下文（局域网 http）下没有 crypto.randomUUID，确认名称仍能保存并进入产品工作区', async ({ page }) => {
+  await simulateInsecureContext(page); await mockFlow(page); await mockNaming(page);
+  await page.addInitScript(() => localStorage.setItem('zhichuang-projects-v1', '[]'));
+  await page.goto('/#utility');
+  expect(await page.evaluate(() => typeof crypto.randomUUID)).toBe('undefined');
+  await page.getByLabel('企业名称', { exact: false }).fill('明远设备有限公司'); await page.getByLabel('产品名称', { exact: false }).fill('光伏组件安装支架');
+  await page.getByRole('button', { name: '生成产品建议' }).click(); await page.getByRole('button', { name: '光伏组件安装支架', exact: true }).click();
+  await page.getByLabel('H型截面').check(); await page.getByRole('radio', { name: '构造改进' }).check();
+  await page.getByRole('button', { name: '生成结构资料选项' }).click();
+  for (const label of ['壳体与支架', '固定连接', '部件相对固定', '平板与方壳']) await page.getByRole('checkbox', { name: new RegExp(label) }).check();
+  await page.getByRole('button', { name: '确认所选结构资料' }).click(); await page.getByRole('button', { name: '确认选项并生成名称' }).click();
+  await page.locator('.un-candidate').first().click(); await page.getByRole('checkbox', { name: /我已确认名称/ }).check();
+  await page.getByRole('button', { name: '确认名称并检查产品逻辑' }).click();
+  await expect(page.getByTestId('product-workflow')).toBeVisible(); expect(page.url()).toMatch(/#utility\/[0-9a-f-]{36}$/);
+  await expect(confirmButton(page)).toBeEnabled();
+});
+test('非安全上下文（局域网 http）下没有 crypto.subtle，确认预览与 Word 导出仍能校验图片摘要', async ({ page }, testInfo) => {
+  await simulateInsecureContext(page); await seed(page, makeWorkflow(false)); await mockFlow(page); await open(page);
+  expect(await page.evaluate(() => typeof crypto.subtle)).toBe('undefined');
+  await expect(confirmButton(page)).toBeEnabled(); await confirmButton(page).click(); await expect(exportButton(page)).toBeEnabled();
+  const downloadPromise = page.waitForEvent('download'); await exportButton(page).click(); const download = await downloadPromise;
+  const file = testInfo.outputPath('product-insecure-context.docx'); await download.saveAs(file);
+  const zip = await JSZip.loadAsync(await readFile(file)); expect(await zip.file('word/document.xml')!.async('string')).toContain('权利要求1');
+});

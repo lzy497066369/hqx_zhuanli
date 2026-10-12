@@ -3,6 +3,7 @@ import type { CadViewDrawing, ProductImage, ProductPreview, ProductWorkflow } fr
 import { CAD_VIEWS, PREVIEW_VIEWS, hasCurrentCad, isProductWorkflow, isProductWorkflowComplete } from './productWorkflow';
 import { PATENT_FIGURE_TEMPLATES } from './productPrompts';
 import { fitWordImage, packPatentWord, patentSection, WORD_BODY, WORD_BODY_PARAGRAPH, WORD_STYLES, wordCaption, wordHeading, wordImageParagraph, wordTitle } from '../utility/wordFormat';
+import { sha256Hex } from './digest';
 
 function body(text: string): Paragraph {
   return new Paragraph({ ...WORD_BODY_PARAGRAPH, children: [new TextRun({ text, ...WORD_BODY })] });
@@ -11,7 +12,7 @@ function paragraphs(text: string): Paragraph[] {
   return text.split(/\n+/).map(line => line.trim()).filter(Boolean).map(line => body(line));
 }
 async function sha256(bytes: Uint8Array): Promise<string> {
-  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes.slice()))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+  return sha256Hex(bytes);
 }
 export async function productImageBytes(image: ProductImage): Promise<Uint8Array> {
   const encoded = image.dataUrl.split(',')[1];

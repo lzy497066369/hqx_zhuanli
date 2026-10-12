@@ -38,6 +38,7 @@ import {
 } from "./data";
 import type { CategoryId, Project } from "./data";
 import { deleteNamingDraft, loadProjectsAsync, saveProjectsAsync } from "./storage/projectStorage";
+import { newId } from "./storage/id";
 import { Illustration } from "./components/Illustration";
 import { UtilityNaming } from "./features/utility/UtilityNaming";
 import { ProductWorkflowWorkspace } from './features/product/ProductWorkflowWorkspace';
@@ -169,7 +170,7 @@ function App() {
     }
     if (category === "invention") {
       const project: Project = {
-        id: crypto.randomUUID(),
+        id: newId(),
         category: "invention",
         name: name.trim() || "未命名发明专利",
         owner: "",
@@ -203,7 +204,7 @@ function App() {
     setToast("名称已保存，进入逻辑校验、彩色预览和申请材料流程");
   };
   const saveUtilityName = (naming: NamingRecord) => {
-    const id = utilityProject?.id || crypto.randomUUID();
+    const id = utilityProject?.id || newId();
     const project: Project = {
       id,
       category: "utility",
@@ -262,7 +263,7 @@ function App() {
     }
     setSaving(true);
     const project: Project = {
-      id: editor?.id || crypto.randomUUID(),
+      id: editor?.id || newId(),
       name,
       category: data.get("category") as CategoryId,
       owner: String(data.get("owner") || "").trim(),
@@ -971,7 +972,7 @@ function App() {
                       setMaterials((m) => [
                         ...m,
                         ...files.map((file) => ({
-                          id: crypto.randomUUID(),
+                          id: newId(),
                           name: file.name,
                           size: file.size,
                         })),
