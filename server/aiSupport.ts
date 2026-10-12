@@ -83,10 +83,31 @@ function providerKey(provider: AiProvider): string {
 
 const COOLDOWN_CODES = new Set(['AI_AUTH', 'AI_RATE_LIMIT', 'AI_UPSTREAM', 'AI_NETWORK', 'AI_ATTEMPT_TIMEOUT']);
 
+/**
+ * 连接层故障：DNS、连接被重置、TLS、以及 Node 自带 undici 在 300 秒收不到响应头时抛的
+ * `TypeError: fetch failed`（cause 为 UND_ERR_HEADERS_TIMEOUT）。它们都是普通 Error 而不是 AiFailure，
+ * 属于可用性问题，应当切换备用 provider 并熔断，而不是整单失败。
+ * SyntaxError 来自上游坏内容，AbortError 来自我们自己的取消或超时信号，都不算连接层故障。
+ */
+export function isTransientNetworkError(error: unknown): boolean {
+  return error instanceof Error && !(error instanceof AiFailure) && !(error instanceof SyntaxError) && error.name !== 'AbortError';
+}
+
 export function shouldCoolDownProvider(error: unknown): boolean {
   if (error instanceof AiFailure) return COOLDOWN_CODES.has(error.code);
-  // SyntaxError 一般来自上游返回的坏内容，属于内容质量问题，不熔断。
-  return error instanceof Error && !(error instanceof SyntaxError);
+  return isTransientNetworkError(error);
+}
+
+/**
+ * 单次 provider 尝试的超时上限。Node 22 自带 undici 对「无响应头」默认 300 秒就直接抛错，
+ * 而我们的请求是 stream:false，模型生成完之前上游不会回任何响应头。
+ * 如果单次尝试超时比 300 秒还长，先触发的是 undici，错误既不是 AI_ATTEMPT_TIMEOUT 也不会切换模型。
+ * 所以均分后的超时必须封顶在 300 秒之前，留 30 秒余量。
+ */
+export const ATTEMPT_TIMEOUT_CAP_MS = 270_000;
+
+export function attemptTimeoutMs(budgetMs: number, share: number, providerCount: number): number {
+  return Math.min(ATTEMPT_TIMEOUT_CAP_MS, Math.max(1, Math.floor(budgetMs * share / Math.max(1, providerCount))));
 }
 
 export function availableProviders(providers: AiProvider[]): AiProvider[] {

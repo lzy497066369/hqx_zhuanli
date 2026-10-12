@@ -3,7 +3,7 @@ import type { ProductBrief, InnovationNameCandidate, InnovationCandidatesRespons
 import { isInnovationNameCandidate, isProductBrief, normalizeStructureFacts, patentStructureSource } from '../src/features/utility/patentStructure.ts';
 import type { PatentResearch } from '../src/features/utility/patentResearch.ts';
 import type { AiConfig } from './aiSupport.ts';
-import { AiFailure, AI_USER_AGENT, aiProviders, generationProviders, markProviderFailed, markProviderSucceeded, responseText, shouldCoolDownProvider } from './aiSupport.ts';
+import { AiFailure, AI_USER_AGENT, aiProviders, generationProviders, isTransientNetworkError, markProviderFailed, markProviderSucceeded, responseText, shouldCoolDownProvider } from './aiSupport.ts';
 import { researchPatents } from './patentResearch.ts';
 import { isStructureDraft } from '../src/features/utility/structureDraft.ts';
 import { normalizeStructureDraft } from '../src/features/utility/structureDraftNormalizer.ts';
@@ -223,7 +223,22 @@ function repairConfig(config: AiConfig, model: string | undefined, switchProvide
 }
 
 function retryable(error: unknown) {
-  return error instanceof AiFailure && ['AI_RATE_LIMIT', 'AI_UPSTREAM', 'AI_NETWORK', 'AI_INCOMPLETE', 'AI_INVALID_JSON', 'AI_INVALID_MODEL', 'AI_INVALID_OUTPUT', 'AI_ATTEMPT_TIMEOUT'].includes(error.code);
+  if (error instanceof AiFailure) return ['AI_RATE_LIMIT', 'AI_UPSTREAM', 'AI_NETWORK', 'AI_INCOMPLETE', 'AI_INVALID_JSON', 'AI_INVALID_MODEL', 'AI_INVALID_OUTPUT', 'AI_ATTEMPT_TIMEOUT'].includes(error.code);
+  // 连接层故障（含 undici 300 秒无响应头）不是 AiFailure；以前这里直接整单失败，不切换备用模型。
+  return isTransientNetworkError(error);
+}
+
+// 可用性故障落日志：以前这类错误被各阶段统一改写成「文本模型连接失败」，容器日志里没有任何记录，无从排查。
+// 只记录错误名、cause 里的错误码和截断后的消息；密钥即便出现在消息里也要抹掉。
+function logProviderFailure(provider: { baseUrl: string; apiKey: string; model: string }, failure: unknown, httpStatus: number | null, elapsedMs: number) {
+  const describe = (value: unknown) => {
+    if (!(value instanceof Error)) return String(value ?? '').slice(0, 200);
+    const code = (value as { code?: unknown }).code;
+    return `${value.name}${typeof code === 'string' ? `(${code})` : ''}: ${value.message}`.split(provider.apiKey).join('[redacted]').slice(0, 300);
+  };
+  const cause = (failure as { cause?: unknown })?.cause;
+  console.warn('ai provider failure', { host: new URL(provider.baseUrl).hostname, model: provider.model, httpStatus, elapsedMs,
+    error: describe(failure), ...(cause !== undefined ? { cause: describe(cause) } : {}) });
 }
 
 export async function chatJson(prompt: string, input: unknown, config: AiConfig, signal: AbortSignal, fetcher: typeof fetch, maxTokens: number, imageData?: string | string[], accept?: (value: unknown) => StructureAcceptance, options?: ChatJsonOptions) {
@@ -321,6 +336,7 @@ export async function chatJson(prompt: string, input: unknown, config: AiConfig,
         if (strict) throw failure;
         lastError = failure;
         if (signal.aborted) throw failure;
+        if (shouldCoolDownProvider(failure)) logProviderFailure(provider, failure, httpStatus, Date.now() - started);
         if (!retryable(failure)) throw failure;
         // 可用性故障（鉴权/限流/上游/网络/单次超时）才熔断；内容质量问题只在本请求内切换。
         if (shouldCoolDownProvider(failure)) markProviderFailed(provider);

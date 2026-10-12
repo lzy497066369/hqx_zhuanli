@@ -1,5 +1,5 @@
 import type { AiConfig } from './aiSupport.ts';
-import { AiFailure, aiProviders } from './aiSupport.ts';
+import { AiFailure, aiProviders, attemptTimeoutMs as attemptTimeoutBudget } from './aiSupport.ts';
 import { chatJson } from './patentStructureAi.ts';
 import type { ProgressReporter } from './patentStructureAi.ts';
 import { checkName, checkProduct, improvementTypes, isAccessorySubject, isStructuralFeature, keepsProtectedSubject, validateProfile } from '../src/features/utility/naming.ts';
@@ -15,7 +15,7 @@ async function generateWithFallback(prompt: string, input: unknown, config: AiCo
   const timeoutMs = namingTimeoutMs(config);
   const timeout = AbortSignal.timeout(timeoutMs);
   const combined = AbortSignal.any([signal, timeout]);
-  const attemptTimeoutMs = Math.max(1, Math.floor(timeoutMs * 0.9 / aiProviders(config).length));
+  const attemptTimeoutMs = attemptTimeoutBudget(timeoutMs, 0.9, aiProviders(config).length);
   try {
     return await chatJson(prompt, input, config, combined, fetcher, maxTokens, undefined, value => {
       onProgress?.('筛选模型输出', '正在核对生成内容与已选产品结构');

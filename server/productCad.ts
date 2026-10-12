@@ -7,7 +7,7 @@ import { access, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promi
 import { constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
-import { AiFailure, generationProviders } from './aiSupport.ts';
+import { AiFailure, attemptTimeoutMs, generationProviders } from './aiSupport.ts';
 import type { AiConfig } from './aiSupport.ts';
 import { chatJson } from './patentStructureAi.ts';
 import type { ProgressReporter } from './patentStructureAi.ts';
@@ -325,7 +325,7 @@ export async function buildProductCad(brief: ProductBrief, images: CadImageInput
       components: brief.design.components.map(part => ({ number: part.number, name: part.name, structure: part.structure, connection: part.connection })), previewImages: labels },
       visual, AbortSignal.any([signal, timeout]), fetcher, 12000, ordered.map(image => image.dataUrl),
       value => { const errors = cadDecisionErrors(value); return errors.length ? errors : true; },
-      { attemptTimeoutMs: Math.max(1, Math.floor(timeoutMs * .95 / Math.max(1, generationProviders(visual).length))), onProgress: progress,
+      { attemptTimeoutMs: attemptTimeoutMs(timeoutMs, .95, generationProviders(visual).length), onProgress: progress,
         validationRetry: { maxTokens: 12000, prompt: details => `${CAD_SCRIPT_PROMPT}\n上一轮脚本未通过校验，请只输出修正后的完整 JSON，逐项修复：\n- ${details.join('\n- ')}` } });
     decision = result.value as CadDecision;
   } catch (error) {

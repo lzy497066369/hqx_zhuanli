@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { AiFailure, generationProviders } from './aiSupport.ts';
+import { AiFailure, attemptTimeoutMs, generationProviders } from './aiSupport.ts';
 import type { AiConfig } from './aiSupport.ts';
 import { chatJson } from './patentStructureAi.ts';
 import type { ProgressReporter } from './patentStructureAi.ts';
@@ -65,7 +65,7 @@ async function productJson<T>(prompt: string, input: unknown, config: AiConfig, 
     // 校验不通过时把具体原因回给模型修正一次，而不是直接整体失败；最终仍不通过时把原因一并返回前端。
     const result = await chatJson(prompt, input, config, AbortSignal.any([signal, timeout]), fetcher, maxTokens, undefined,
       value => accept(value) ? true : (explain?.(value) ?? ['返回的 JSON 不符合要求的结构。']),
-      { attemptTimeoutMs: Math.max(1, Math.floor(timeoutMs * .95 / Math.max(1, generationProviders(config).length))), onProgress: progress,
+      { attemptTimeoutMs: attemptTimeoutMs(timeoutMs, .95, generationProviders(config).length), onProgress: progress,
         validationRetry: { maxTokens, prompt: details => `${prompt}\n上一轮输出未通过校验，请只输出修正后的完整纯 JSON，逐项修复以下问题：\n- ${details.join('\n- ')}` } });
     return result.value as T;
   } catch (error) {
