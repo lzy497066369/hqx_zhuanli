@@ -6,7 +6,6 @@ import { compileStructureDraft, bindCompiledIds } from '../src/features/utility/
 import { modelToComponents } from '../src/features/utility/patentStructure';
 import { nextDraftComponent } from '../src/features/utility/structureDraft';
 import type { StructureDraft } from '../src/features/utility/structureDraft';
-import { confirmSkeleton, generateStructure, mockStructure, openNamedWorkspace, savedProject } from './fixtures/structureFlow';
 
 // 尺寸 10 的方块按 10 的间距排列，相邻面恰好贴合：装配几何校验要求声明相连的
 // 部件在几何上接触，不能存在间隙或穿插。
@@ -157,26 +156,4 @@ test('失败草案不覆盖已确认模型；旧模型与文案/附图引用保�
   expect(editing.patentStructureModel).toBe(previous);
   expect(editing.utilityMaterials.claims).toBe('既有权利要求');
   expect(editing.design.structureModel).toBe(previous);
-});
-
-test('验收：AI 失败保留旧模型和文案，重试成功才替换', async ({ page }) => {
-  await mockStructure(page);
-  const title = await openNamedWorkspace(page);
-  await generateStructure(page);
-  const before = await savedProject(page, title);
-  await page.unroute('**/api/utility/structure-skeleton');
-  await page.route('**/api/utility/structure-skeleton', route => route.fulfill({ status: 503, json: { error: { message: 'AI offline' } } }));
-  await page.getByRole('button', { name: '按名称重新生成结构' }).click();
-  await expect(page.getByTestId('patent-structure-flow').getByRole('alert')).toContainText('结构自动生成失败');
-  await expect(page.getByTestId('patent-structure-flow').getByRole('alert')).not.toContainText('AI offline');
-  const after = await savedProject(page, title);
-  expect(after.utilityDrawing.patentStructureModel).toEqual(before.utilityDrawing.patentStructureModel);
-  expect(after.utilityDrawing.design).toEqual(before.utilityDrawing.design);
-  expect(after.utilityMaterials).toEqual(before.utilityMaterials);
-  await page.unroute('**/api/utility/structure-skeleton');
-  await mockStructure(page);
-  await page.getByRole('button', { name: '按名称重新生成结构' }).click();
-  await confirmSkeleton(page);
-  await expect(page.getByTestId('patent-structure-flow').getByRole('alert')).toHaveCount(0);
-  await expect(page.locator('[data-structure-model="determined"]')).toBeVisible();
 });

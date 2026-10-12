@@ -83,5 +83,3 @@ export function freezePatentPackage(project: Project, drawing: UtilityDrawing, m
   return deepFreeze({ version: 1 as const, frozenAt: new Date().toISOString(), context,
     document, figureSpecs: model.figureSpecs, validationReport, drawing: snapshot.drawing, project: snapshot.project });
 }
-
-export type FinalPatentPackage = ReturnType<typeof freezePatentPackage>;

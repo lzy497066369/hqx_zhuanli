@@ -1,6 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./tests",
+  // These suites require the separate offline configs and an external artifact
+  // directory with the network guard installed; they cannot run in the UI suite.
+  testIgnore: [
+    "**/utility-phase17-evidence.spec.ts",
+    "**/utility-responses-stage-boundary.spec.ts",
+    "**/phase16f-query-coverage.spec.ts",
+  ],
   fullyParallel: true,
   reporter: [["list"], ["html", { open: "never" }]],
   use: {

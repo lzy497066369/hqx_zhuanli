@@ -7,12 +7,12 @@ import { createPhase18NetworkGuard } from './support/phase18NetworkGuard.mjs';
 import { providerResearchFixture } from './fixtures/research.ts';
 import { offlinePatentFetch } from './fixtures/verifiedPatentPage.ts';
 import { buildResearchEvidence } from '../src/features/utility/patentEvidence.ts';
-const config = { baseUrl: 'https://api.psydo.top/v1', model: 'gpt-6-astra', researchModel: 'gpt-6-astra',
-  researchProtocol: 'responses' as const, apiKey: 'OFFLINE_ONLY', fallbackModel: 'gpt-6-sol', secondFallbackModel: 'gpt-5.6-sol' };
+const config = { baseUrl: 'https://api.psydo.top/v1', model: 'gpt-6.1-sol', researchModel: 'gpt-6.1-sol',
+  researchProtocol: 'responses' as const, apiKey: 'OFFLINE_ONLY', fallbackModel: 'gpt-6-sol', secondFallbackModel: 'gpt-6-astra' };
 const input = { title: '机械夹具', technicalField: '可调夹持 夹持机构 夹紧结构', structure: '', workingPrinciple: '' };
 const page = 'https://patents.google.com/patent/CN217307583U/en';
 const post = { method: 'POST', redirect: 'error' as const, headers: { Authorization: 'Bearer OFFLINE_ONLY' },
-  body: JSON.stringify({ model: 'gpt-6-astra', stream: false, tool_choice: 'required',
+  body: JSON.stringify({ model: 'gpt-6.1-sol', stream: false, tool_choice: 'required',
     tools: [{ type: 'web_search', filters: { allowed_domains: ['patents.google.com'] } }], include: ['web_search_call.action.sources'] }) };
 const get = { method: 'GET', redirect: 'error' as const };
 const provider = config.baseUrl + '/responses';

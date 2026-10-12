@@ -38,8 +38,8 @@ export type ProductImageRef = {
 };
 export type ProductImage = ProductImageRef & { dataUrl: string; prompt: string; model: string };
 // 彩色预览由四条并行生图请求产出，每个视角一张图；附图登记表与视角定义集中在 productPrompts.ts。
-export { PREVIEW_VIEWS, CAD_VIEWS, FIGURE_CATALOG, PREVIEW_TEMPLATE_IDS } from './productPrompts.ts';
-export type { PreviewViewId, CadViewId } from './productPrompts.ts';
+export { PREVIEW_VIEWS, CAD_VIEWS, FIGURE_CATALOG } from './productPrompts.ts';
+export type { CadViewId } from './productPrompts.ts';
 export type ProductPreviewRef = {
   id: string; briefId: string; viewIds: string[]; digest: string; createdAt: string; signature: string;
 };

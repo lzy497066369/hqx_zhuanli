@@ -1,4 +1,4 @@
-import { isPatentResearch, isProductConcept } from './patentResearch.ts';
+import { isProductConcept } from './patentResearch.ts';
 import type { PatentResearch, ProductConcept } from './patentResearch.ts';
 import { parseGeometry } from './contentDrawing.ts';
 
@@ -45,11 +45,4 @@ export function isDrawingPlan(value: unknown): value is DrawingPlan {
   return p.status === 'ready'
     ? p.questions.length === 0 && parseGeometry(p.geometryText).errors.length === 0
     : !p.geometryText.trim() && p.questions.length > 0;
-}
-export function isPlanResponse(value: unknown): value is DrawingPlanResponse {
-  if (!value || typeof value !== 'object') return false;
-  const r = value as DrawingPlanResponse;
-  return (r.research === undefined || isPatentResearch(r.research)) && isDrawingPlan(r.plan) && typeof r.source === 'string' && r.source.length <= 150000 &&
-    typeof r.model === 'string' && r.model.length > 0 && r.model.length <= 100 &&
-    typeof r.generatedAt === 'string' && Number.isFinite(Date.parse(r.generatedAt));
 }

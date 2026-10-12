@@ -69,9 +69,9 @@ try {
   const { factMatchesOriginalPage } = await import('../src/features/utility/patentResearch.ts');
   config = readAiConfig({ ...loadEnv('development', root, 'AI_'), ...process.env });
   for (const key of [config.apiKey, config.fallbackApiKey, config.secondFallbackApiKey]) if (typeof key === 'string' && key.length > 3) sensitive.add(key);
-  assert.equal(config.baseUrl, 'https://api.psydo.top/v1'); assert.equal(config.model, 'gpt-6-astra');
-  assert.equal(config.researchModel, 'gpt-6-astra'); assert.equal(config.researchProtocol, 'responses');
-  assert.equal(config.fallbackModel, 'gpt-6-sol'); assert.equal(config.secondFallbackModel, 'gpt-5.6-sol');
+  assert.equal(config.baseUrl, 'https://api.psydo.top/v1'); assert.equal(config.model, 'gpt-6.1-sol');
+  assert.equal(config.researchModel, 'gpt-6.1-sol'); assert.equal(config.researchProtocol, 'responses');
+  assert.equal(config.fallbackModel, 'gpt-6-sol'); assert.equal(config.secondFallbackModel, 'gpt-6-astra');
   assert(config.apiKey.trim());
   assert.notEqual(process.env.NODE_TLS_REJECT_UNAUTHORIZED, '0');
   assert.notEqual(process.env.NODE_USE_ENV_PROXY, '1');
@@ -80,7 +80,7 @@ try {
   assert.deepEqual(strictResearchPolicy, { maxProviderRequests: 1, allowFallback: false, allowRotation: false, maxAttempts: 1 });
   const changedProduction = Object.keys(baseline).filter(file => !file.startsWith('tests/') && baseline[file] !== sourceBeforeRun[file]);
   assert.deepEqual(changedProduction, []);
-  audit.configuration = { provider: 'api.psydo.top', model: 'gpt-6-astra', protocol: 'responses',
+  audit.configuration = { provider: 'api.psydo.top', model: 'gpt-6.1-sol', protocol: 'responses',
     credentialsPresent: true, pinnedProviderCount: 1, productionConfigUnmodified: true,
     patentPagesOptIn: true, generation: 'DISABLED', fallback: 'DISABLED', rotation: 'DISABLED', retry: 'DISABLED' };
   if (mode === '--real') {
@@ -95,7 +95,7 @@ try {
     audit.dispatchLockAcquired = true;
   }
   audit.preflight = 'PASS'; checkpoint();
-  console.log(['Provider: api.psydo.top', 'Model: gpt-6-astra', 'Protocol: responses', 'Research requests: 0 / 1',
+  console.log(['Provider: api.psydo.top', 'Model: gpt-6.1-sol', 'Protocol: responses', 'Research requests: 0 / 1',
     'Fallback: DISABLED', 'Rotation: DISABLED', 'Retry: DISABLED', 'Generation: DISABLED',
     `Mode: ${mode.slice(2)}`].join('\n'));
   if (mode === '--preflight') {
@@ -186,7 +186,7 @@ try {
       queryCount: stage('query-coverage')?.observedQueryCount ?? null, queryCoverage });
     safeSave('real-evidence-chain.json', chain);
     safeSave('verification.json', { classification, finalStatus: classification === 'PASS' ? 'PHASE18_PASS' : classification,
-      provider: 'api.psydo.top', model: 'gpt-6-astra', protocol: 'responses', security,
+      provider: 'api.psydo.top', model: 'gpt-6.1-sol', protocol: 'responses', security,
       networkGuard: guard?.state.installed && guard.state.blockedAttempts === 0 ? 'PASS' : 'FAIL',
       modifiedFiles: modified, unexpectedChanges: unexpected, productionFilesUnchanged: unexpected.length === 0,
       failure, history: 'unchanged', phase19: 'NOT_STARTED', chain });

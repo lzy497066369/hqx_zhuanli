@@ -52,7 +52,6 @@ ${Object.entries(geometryShapeLabels).map(([shape, label]) => `${label}：${geom
 圆柱、圆管、圆锥、棱柱、弹簧和螺纹圆柱默认沿 Z 轴；位置按形状定义为底面中心、球心或中心；旋转绕部件位置依次绕 X、Y、Z 轴，单位为度。
 所有部件使用同一坐标系，X 向右、Y 向后、Z 向上。`;
 export const GEOMETRY_HELP = `${GEOMETRY_FORMAT}只填写已确认的几何信息，手动解析器不会自动猜测装配关系。`;
-export const GEOMETRY_EXAMPLE = '底座 | 长方体 | 0,0,0 | 120,80,10\n立柱 | 圆柱体 | 60,40,10 | 8,100';
 export function isComponentSpec(value: unknown): value is ComponentSpec {
   if (!value || typeof value !== 'object') return false;
   const p = value as ComponentSpec;

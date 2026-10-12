@@ -6,6 +6,7 @@ services:
     image: zhichuang-workshop:latest
     container_name: zhichuang-workshop
     restart: unless-stopped
+    # 只绑回环，供本机调试；对外一律走 gateway 网关（带账号鉴权）。
     ports:
       - "127.0.0.1:4173:4173"
     # 密钥只放在宿主机的 .env.local，不进镜像、不进仓库。
@@ -14,8 +15,9 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 4173
-      # 浏览器访问用的站点来源；经反向代理 HTTPS 发布时改成 https://你的域名
-      ALLOWED_ORIGINS: http://127.0.0.1:4173,http://localhost:4173
+      # 浏览器访问用的站点来源白名单，经网关后 Host 保持原样，
+      # 所以必须列出实际访问地址；值来自同目录 .env。
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://127.0.0.1:4173,http://localhost:4173}
       FREECAD_CMD: /usr/bin/freecadcmd
       FREECAD_TIMEOUT_MS: "300000"
     # FreeCAD 建模与网格投影吃内存，给出保底上限；并发上限由服务端自身限制（同时 3 个任务）。
@@ -25,6 +27,31 @@ services:
           memory: 3g
     tmpfs:
       - /tmp:size=1g
-    read_only: false
     security_opt:
       - no-new-privileges:true
+
+  # 局域网网关：账号鉴权后转发到应用容器。见 deploy/Caddyfile。
+  # 只绑局域网网卡 192.168.0.58，因此只有本网段能连到；本机 IP 变化时改这一行。
+  gateway:
+    image: caddy:2-alpine
+    container_name: zhichuang-gateway
+    restart: unless-stopped
+    depends_on:
+      zhichuang:
+        condition: service_healthy
+    ports:
+      - "192.168.0.58:80:80"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      BASIC_AUTH_USER: ${BASIC_AUTH_USER:-}
+      BASIC_AUTH_HASH: ${BASIC_AUTH_HASH:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  caddy_data:
+  caddy_config:

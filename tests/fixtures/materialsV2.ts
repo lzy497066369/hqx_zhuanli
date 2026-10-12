@@ -1,5 +1,3 @@
-import { expect } from '@playwright/test';
-import type { Page } from '@playwright/test';
 import type { UtilityMaterials } from '../../src/data';
 import type { PatentGenerationContext } from '../../src/features/utility/claimPlan';
 import { getModelVersion } from '../../src/features/utility/patentStructure';
@@ -43,30 +41,4 @@ export function materialsForContext(context: PatentGenerationContext): UtilityMa
     claimReferences: claimPlan.claims.map(({ claimNo, parentClaimNo, componentIds, connectionIds, motionIds }) =>
       ({ claimNo, parentClaimNo, componentIds, connectionIds, motionIds })),
   }, context);
-}
-
-export async function mockMaterialsV2(page: Page, transform?: (materials: UtilityMaterials) => UtilityMaterials) {
-  const contexts: PatentGenerationContext[] = [];
-  let latest: UtilityMaterials | undefined;
-  await page.route('**/api/utility/materials-v2', async route => {
-    const input = route.request().postDataJSON() as { context: PatentGenerationContext; patentType: string };
-    expect(input.context.model).toBeTruthy();
-    expect(input.context.evidence).toBeTruthy();
-    expect(input.context.reasoning).toBeTruthy();
-    expect(input.context.claimPlan.claims.length).toBeGreaterThan(0);
-    contexts.push(input.context);
-    latest = withTestGenerationProof(transform?.(materialsForContext(input.context)) || materialsForContext(input.context), input.context);
-    await route.fulfill({ json: { taskId: 'test-materials-v2' } });
-  });
-  await page.route('**/api/utility/materials-v2/status/test-materials-v2', route => route.fulfill({ json: {
-    status: 'completed', result: { readyForExport: true }, materials: latest,
-  } }));
-  return contexts;
-}
-
-export async function generateMaterialsV2(page: Page) {
-  await page.getByRole('tab', { name: '申请材料' }).click();
-  await page.getByRole('button', { name: '重新生成文案' }).click();
-  await expect(page.getByText('V2 文案已生成并通过最终校验。')).toBeVisible();
-  await expect(page.getByRole('button', { name: '下载 Word' })).toBeEnabled();
 }

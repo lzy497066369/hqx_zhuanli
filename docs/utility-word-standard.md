@@ -113,7 +113,7 @@ Word 按五个连续分节输出，并在每节使用独立的正式 Header 和 
 
 ## 5. Word 版式标准
 
-- 导出入口为 `src/features/utility/wordExport.tsx` 的 `createUtilityWordBlob`，继续使用现有 `docx` 库；纯格式规则集中在 `wordFormat.ts`。历史文件 `public/templates/utility-standard.docx` 不参与当前导出，也不作为本次排版依据。
+- 历史项目的导出入口为 `src/features/utility/wordExport.tsx` 的 `createUtilityWordBlob`，使用现有 `docx` 库；纯格式规则集中在 `wordFormat.ts`。未参与导出的旧 Word 模板已于 2026-10-12 从公开资源目录移除。当前产品流程导出入口为 `src/features/product/productWordExport.ts`。
 - 页面参数按《藤编座椅(1).doc》实测：A4 纵向，11906 × 16838 twip；上/下/左/右边距 1417 / 850 / 1418 / 851 twip，约为 2.5 / 1.5 / 2.5 / 1.5 cm；装订线 0；页眉/页脚距离 850 / 454 twip。所有分节一致，内容长度不改变边距。
 - 正文：宋体 `SimSun`，14pt，黑色，字符缩放 100%，字符间距 0，左对齐，段前段后 0，正式首行缩进 2 字符（`firstLineChars=200`），无 Tab 或空格模拟缩进。左对齐以参考文档的实际段落属性和当前导出结果为准。
 - 各分节启用只指定行的文档网格：`docGrid type="lines" linePitch="312" charSpace="0"`，网格间距 15.6pt，正文吸附网格。不叠加单倍、1.5 倍或多倍行距。网格间距不等于可见文字基线间距；字体行高可能占用两个网格，这是参考文档的网格行为。

@@ -53,10 +53,6 @@ export type StructureDraft = {
   nextDraftNumber: number;
   nextModelNumber: number;
 };
-
-export function emptyStructureDraft(title: string): StructureDraft {
-  return { version: 1, title, technicalField: '', baseStructure: '', components: [], relationships: [], motions: [], innovationPoints: [], problemSolved: '', workingPrinciple: '', nextDraftNumber: 1, nextModelNumber: 1 };
-}
 export function nextDraftComponent(draft: StructureDraft): { id: string; nextDraftNumber: number } {
   const used = Math.max(0, ...draft.components.map(c => Number(c.id.slice(1)) || 0));
   const next = Math.max(draft.nextDraftNumber, used + 1);

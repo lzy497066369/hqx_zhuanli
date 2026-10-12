@@ -193,7 +193,7 @@ for (const category of ['utility', 'invention'] as const) test(`${category} 从�
   await page.getByRole('button', { name: '生成结构资料选项' }).click();
   for (const label of ['壳体与支架', '固定连接', '部件相对固定', '平板与方壳']) await page.getByRole('checkbox', { name: new RegExp(label) }).check();
   await page.getByRole('button', { name: '确认所选结构资料' }).click(); await page.getByRole('button', { name: '确认选项并生成名称' }).click();
-  await page.locator('.un-candidate').first().click(); await page.getByRole('checkbox', { name: /我已确认名称/ }).check();
+  await page.locator('.un-candidate').first().click();
   await page.getByRole('button', { name: '确认名称并检查产品逻辑' }).click(); await expect(confirmButton(page)).toBeEnabled();
   const selection = mock.inputs.find(input => input.stage === 'review')!.body.selection as ProductSelection;
   expect(selection.company).toBe('明远设备有限公司'); expect(selection.choices).toHaveLength(5); expect(selection.proposedName).toContain('光伏组件安装支架'); expect(selection.patentType).toBe(category);
@@ -239,7 +239,7 @@ test('非安全上下文（局域网 http）下没有 crypto.randomUUID，确认
   await page.getByRole('button', { name: '生成结构资料选项' }).click();
   for (const label of ['壳体与支架', '固定连接', '部件相对固定', '平板与方壳']) await page.getByRole('checkbox', { name: new RegExp(label) }).check();
   await page.getByRole('button', { name: '确认所选结构资料' }).click(); await page.getByRole('button', { name: '确认选项并生成名称' }).click();
-  await page.locator('.un-candidate').first().click(); await page.getByRole('checkbox', { name: /我已确认名称/ }).check();
+  await page.locator('.un-candidate').first().click();
   await page.getByRole('button', { name: '确认名称并检查产品逻辑' }).click();
   await expect(page.getByTestId('product-workflow')).toBeVisible(); expect(page.url()).toMatch(/#utility\/[0-9a-f-]{36}$/);
   await expect(confirmButton(page)).toBeEnabled();

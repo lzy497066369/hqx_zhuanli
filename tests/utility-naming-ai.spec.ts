@@ -3,7 +3,7 @@ import { generateNamingNames, generateNamingOptions } from '../server/namingAi';
 import { aiProviders, markProviderSucceeded } from '../server/aiSupport';
 import { emptyProfile } from '../src/features/utility/naming';
 
-const config = { baseUrl: 'https://provider.example/v1', apiKey: 'server-secret', model: 'gpt-6-astra', fallbackModel: 'gpt-6-sol', secondFallbackModel: 'gpt-5.6-sol' };
+const config = { baseUrl: 'https://provider.example/v1', apiKey: 'server-secret', model: 'gpt-6.1-sol', fallbackModel: 'gpt-6-sol', secondFallbackModel: 'gpt-6-astra' };
 // provider 冷却表是进程级共享状态：前一个用例的失败会把 provider 打进 5 分钟冷却，
 // 使后续用例跳过它，产生「单独跑通过、整套跑失败」的假失败。每个用例前清除。
 test.beforeEach(() => { for (const provider of aiProviders(config)) markProviderSucceeded(provider); });
@@ -23,7 +23,7 @@ test('集成：名称生成使用主模型，五个保护客体及三个名称�
   expect(offered.options).toHaveLength(5);
   const named = await generateNamingNames({ profile: { ...emptyProfile, company: '钢材公司', business: '钢材', product: 'H型钢梁', features: 'H型截面、螺栓连接板' }, previous: [] }, config, new AbortController().signal, fetcher);
   expect(named.candidates).toHaveLength(3);
-  expect(calls).toEqual(['gpt-6-astra', 'gpt-6-astra']);
+  expect(calls).toEqual([config.model, config.model]);
 });
 
 test('系统：不合格模型输出不可采用，备用结果也要校验', async () => {
@@ -207,7 +207,7 @@ test('系统：上游非 JSON 内容会尝试备用模型，并返回可恢复�
   };
   const result = await generateNamingOptions({ company: '钢材公司', business: '钢材' }, config, new AbortController().signal, fetcher);
   expect(result.providerModel).toBe('gpt-6-sol');
-  expect(calls).toEqual(['gpt-6-astra', 'gpt-6-sol']);
+  expect(calls).toEqual(['gpt-6.1-sol', 'gpt-6-sol']);
   const invalid: typeof fetch = async () => Response.json({ choices: [{ finish_reason: 'stop', message: { content: 'not json' } }] });
   await expect(generateNamingOptions({ company: '钢材公司', business: '钢材' }, config, new AbortController().signal, invalid)).rejects.toMatchObject({ code: 'AI_INVALID_JSON', status: 502 });
 });
@@ -217,11 +217,11 @@ test('系统：前两级失败时使用第二备用模型并返回真实模型�
   const fetcher: typeof fetch = async (_url, init) => {
     const model = JSON.parse(String(init?.body)).model;
     calls.push(model);
-    return model === 'gpt-5.6-sol' ? envelope(options) : new Response('unavailable', { status: 503 });
+    return model === 'gpt-6-astra' ? envelope(options) : new Response('unavailable', { status: 503 });
   };
   const result = await generateNamingOptions({ company: '钢材公司', business: '钢材' }, config, new AbortController().signal, fetcher);
-  expect(calls).toEqual(['gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-sol']);
-  expect(result.providerModel).toBe('gpt-5.6-sol');
+  expect(calls).toEqual(['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-astra']);
+  expect(result.providerModel).toBe('gpt-6-astra');
 });
 
 test('系统：主模型卡住时取消该尝试并给备用模型留出时间', async () => {

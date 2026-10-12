@@ -7,19 +7,11 @@ export const PREVIEW_VIEWS = [
   { id: 'top', templateId: 'color-top', title: '俯视图', requirement: '必须是从产品正上方垂直向下看到的俯视图，正投影，不要透视、斜视或轴测角度' },
   { id: 'right', templateId: 'color-right', title: '右视图', requirement: '必须是从产品正右方水平看到产品右侧面的右视图，正投影，不要透视、斜视或轴测角度' },
 ] as const;
-export type PreviewViewId = (typeof PREVIEW_VIEWS)[number]['id'];
-export const PREVIEW_TEMPLATE_IDS: string[] = PREVIEW_VIEWS.map(view => view.templateId);
 
 export const COLOR_PREVIEW_TEMPLATE = `【产品简介】
 {{产品简介占位符}}
 
 根据这个专利内容生成一张2d产品图，要求彩色，只画一个视角：{{视角要求}}。整张图只允许出现这一个视角，不要拼图、不要多视图、不要分格画面、不要额外的局部放大图。`;
-
-/** 上一版单张三视图预览提示词；新流程已改为四张并行单视角图，保留用于核对历史数据。 */
-export const COLOR_PREVIEW_TEMPLATE_V1 = `【产品简介】
-{{产品简介占位符}}
-
-根据这个专利内容生成一张2d产品图，要求彩色，必须有"前视图","俯视图","右视图",如果产品简介里面有需要重点表达的东西可以额外画出。`;
 
 export const PATENT_STRUCTURE_TEMPLATE = `为【主体与结构】绘制一张专利说明书风格的产品结构附图。
 

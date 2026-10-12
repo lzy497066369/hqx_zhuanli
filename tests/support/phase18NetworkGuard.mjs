@@ -62,7 +62,7 @@ export function createPhase18NetworkGuard({ nativeFetch, record = () => {} }) {
         let body;
         try { body = JSON.parse(init.body); } catch { block('PHASE18_INVALID_BODY'); }
         if (state.researchProviderRequests !== 0 || state.patentPageRequests !== 0 || init.method !== 'POST' ||
-            init.redirect !== 'error' || body.model !== 'gpt-6-astra' || body.stream !== false || body.tool_choice !== 'required' ||
+            init.redirect !== 'error' || body.model !== 'gpt-6.1-sol' || body.stream !== false || body.tool_choice !== 'required' ||
             JSON.stringify(body.include) !== '["web_search_call.action.sources"]' ||
             body.tools?.length !== 1 || body.tools[0]?.type !== 'web_search' ||
             JSON.stringify(body.tools[0]?.filters?.allowed_domains) !== '["patents.google.com"]' ||

@@ -9,8 +9,9 @@ npm install
 npm run dev -- --host 127.0.0.1
 ```
 Docker启动
-配置好env文件之后
+配置好 .env.local（模型密钥）和 .env（网关账号、来源白名单）之后
 docker compose up -d --build
+局域网用户经网关 http://192.168.0.58/ 访问，需账号登录；详见 docs/deploy-docker.md。
 
 打开终端中显示的本地地址（默认端口 5173）。构建与本地生产预览：
 

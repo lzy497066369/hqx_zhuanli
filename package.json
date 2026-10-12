@@ -12,7 +12,8 @@
     "test:ui": "playwright test --ui",
     "start": "node --experimental-strip-types --env-file-if-exists=.env.local server/index.ts",
     "test:product": "playwright test --config playwright.product.config.ts",
-    "test:product:live": "node --experimental-strip-types --env-file-if-exists=.env.local tests/support/productWorkflowLive.mjs"
+    "test:product:live": "node --experimental-strip-types --env-file-if-exists=.env.local tests/support/productWorkflowLive.mjs",
+    "test:naming:live": "node --experimental-strip-types --env-file-if-exists=.env.local tests/support/namingOneShotLive.mjs"
   },
   "dependencies": {
     "docx": "^9.7.1",

@@ -236,25 +236,6 @@ export function validatePatentConsistency(input: PatentConsistencyInput): Consis
 }
 
 /**
- * 把一致性错误码映射为可操作的处理建议，让用户知道下一步该点哪里。
- */
-export function consistencyIssueHint(code: string): string {
-  if (code === 'SOURCE_MODEL_VERSION_MISMATCH' || code === 'DOCUMENT_DRAWING_VERSION_MISMATCH' || code === 'DOCUMENT_VERSION_MISSING') {
-    return '版本已变化：请先点击「重新生成文案」，再导出 Word';
-  }
-  if (code.startsWith('CLAIM_') || code === 'INNOVATION_NOT_IN_CLAIM_TEXT') {
-    return '请检查权利要求书的引用与部件编号，修正后重新生成文案再导出';
-  }
-  if (code.startsWith('TEXT_')) {
-    return '文案与结构模型不一致：请修正文案中的部件编号/名称，或返回结构模型确认定义后重新生成文案';
-  }
-  if (code.startsWith('DRAWING_') || code.startsWith('FIGURE_')) {
-    return '附图与结构模型不一致：请点击「重新生成附图」后再导出';
-  }
-  return '请根据提示修正后，重新生成对应内容再导出';
-}
-
-/**
  * 用户确认忽略的一致性错误豁免记录。豁免只绑定「问题 code + 文案原文 +
  * 模型版本」：文案或模型任一变化都会让豁免自动失效，避免把旧判断带到新版本。
  * 只有 error 级别的问题需要豁免，warning 本来就不阻断导出。
@@ -276,18 +257,4 @@ export function isConsistencyExemption(value: unknown): value is ConsistencyExem
     typeof item.reason === 'string' && item.reason.trim().length > 0 &&
     typeof item.modelVersion === 'string' && item.modelVersion.length > 0 &&
     typeof item.exemptedAt === 'string';
-}
-
-/**
- * 从问题列表中移除已被用户豁免的 error。豁免绑定模型版本：
- * 模型版本变化（重新生成结构）或问题文案变化（重新生成文案/附图）后，
- * 旧豁免自动失效，需要重新确认。
- */
-export function applyConsistencyExemptions(issues: ConsistencyIssue[], exemptions: ConsistencyExemption[] | undefined, modelVersion: string): ConsistencyIssue[] {
-  if (!exemptions?.length) return issues;
-  const exempted = new Set(exemptions
-    .filter(exemption => exemption.modelVersion === modelVersion)
-    .map(exemption => `${exemption.code}\n${exemption.message}`));
-  if (!exempted.size) return issues;
-  return issues.filter(issue => issue.severity !== 'error' || !exempted.has(`${issue.code}\n${issue.message}`));
 }

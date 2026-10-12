@@ -75,8 +75,7 @@ test('集成：产品建议、结构多选、名称换批、确认保存与刷�
   await expect(page.locator('.un-candidate')).toHaveCount(3);
   await expect.poll(() => page.locator('.un-candidate').allTextContents()).not.toEqual(before);
   await page.locator('.un-candidate').first().click();
-  await page.getByRole('checkbox', { name: /我已确认名称/ }).check();
-  await page.getByRole('button', { name: '确认名称并保存' }).click();
+  await page.getByRole('button', { name: '确认名称并检查产品逻辑' }).click();
   // 项目持久化已迁到 IndexedDB；localStorage 的旧键只读不写，不能再作为项目数据源。
   const projects = await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -97,6 +96,8 @@ test('集成：产品建议、结构多选、名称换批、确认保存与刷�
   expect(projects[0].naming.profile.improvementType).toBe('combined');
   expect(projects[0].naming.structureSelection.selectedIds).toEqual(['E01', 'E02', 'E03', 'E04']);
   await page.reload();
+  // 刷新后应用停在产品工作区；回到命名页核对草稿已恢复。
+  await page.getByRole('button', { name: '返回修改名称与特征' }).click();
   await expect(page.getByLabel('产品名称', { exact: false })).toHaveValue('钢材');
   await expect(page.locator('.un-option')).toHaveCount(5);
   await expect(page.getByLabel('H型截面')).toBeChecked();

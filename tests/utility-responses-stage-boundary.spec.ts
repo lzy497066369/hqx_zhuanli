@@ -13,8 +13,8 @@ import { createResponsesStageBoundary, ResponsesStageStop } from './support/resp
 import { createStrictResearchInvocation } from './support/strictResearchPolicy.ts';
 
 const input = { title: 'Offline fixture', technicalField: 'Offline mechanical fixture', structure: '', workingPrinciple: '' };
-const config: AiConfig = { baseUrl: 'https://provider.invalid/v1', apiKey: 'OFFLINE_KEY', model: 'gpt-6-astra',
-  researchModel: 'gpt-6-astra', researchProtocol: 'responses', fallbackModel: 'gpt-6-sol', secondFallbackModel: 'gpt-5.6-sol',
+const config: AiConfig = { baseUrl: 'https://provider.invalid/v1', apiKey: 'OFFLINE_KEY', model: 'gpt-6.1-sol',
+  researchModel: 'gpt-6.1-sol', researchProtocol: 'responses', fallbackModel: 'gpt-6-sol', secondFallbackModel: 'gpt-6-astra',
   fallbackBaseUrl: 'https://fallback.invalid/v1', fallbackApiKey: 'OFFLINE_FALLBACK_KEY',
   secondFallbackBaseUrl: 'https://second.invalid/v1', secondFallbackApiKey: 'OFFLINE_SECOND_KEY' };
 type Boundary = ReturnType<typeof createResponsesStageBoundary>;
@@ -162,7 +162,7 @@ test('strict invocation passes observer to actual parser before late onAttempt a
     fetcher: async (url, init) => {
       delegates++; expect(String(url)).toBe('https://provider.invalid/v1/responses');
       expect(init?.redirect).toBe('error');
-      expect(JSON.parse(init?.body as string)).toMatchObject({ model: 'gpt-6-astra', tool_choice: 'required',
+      expect(JSON.parse(init?.body as string)).toMatchObject({ model: 'gpt-6.1-sol', tool_choice: 'required',
         tools: [{ type: 'web_search', filters: { allowed_domains: ['patents.google.com'] } }], include: ['web_search_call.action.sources'] });
       return new Response(JSON.stringify(responsesStageFixture()), { status: 200 });
     } });

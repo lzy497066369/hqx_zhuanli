@@ -1,7 +1,7 @@
 import { isStructureEvidenceOption, isStructureEvidenceSelection } from './structureEvidence.ts';
 import type { StructureEvidenceOption, StructureEvidenceSelection } from './structureEvidence.ts';
 
-/** Local, deterministic naming assistance. No company lookup or novelty assessment. */
+/** Naming input and response validation. No company lookup or novelty assessment. */
 export type CompanyProfile = {
   company: string;
   business: string;
@@ -39,7 +39,6 @@ export const emptyProfile: CompanyProfile = {
   excludedTerms: "",
   improvementType: undefined,
 };
-export const RULE_VERSION = "utility-naming-v1";
 export const countCharacters = (text: string) => Array.from(text).length;
 const promotional = [
   "高效",
@@ -64,13 +63,6 @@ const genericProduct = /^(?:智能)?(?:产品|装置|设备|结构|组件|机构
 const rawMaterial = /^(?:钢材|钢铁|金属|塑料|木材|板材|管材|布料|纺织品|原材料|建材|涂料|食品|化工品|橡胶|玻璃|纸张|石材)$/u;
 const broadProduct = /^(?:钢结构|机械设备|电子设备|自动化设备|建筑结构|未识别到明确的产品客体)$/u;
 const placeholder = /未识别到明确的产品客体|未识别|待确认|待补充|需用户提供|人工核对|模型分析|AI生成/u;
-/** 原材料去掉「料/材」后缀后的核心字（钢材→钢），仅用于展示与兼容判断。 */
-const materialCores = ['钢铁', '钢材', '金属', '塑料', '木材', '板材', '管材', '布料', '纺织品', '涂料', '化工品', '橡胶', '玻璃', '纸张', '石材', '建材'];
-export function productCore(product: string): string {
-  const value = product.trim().replace(/^一种/u, '');
-  for (const material of materialCores) if (value.endsWith(material)) return material.slice(0, -1);
-  return value;
-}
 /** 配件／加工设备类尾词：名称以它们收尾时，保护的是产品之外的另一个东西。 */
 const accessoryHeadNouns = ['连接组件', '连接件', '连接器', '安装支架', '紧固件', '螺栓', '卡扣', '配件', '附件', '夹具', '定位件', '加工设备', '生产设备', '生产线', '机床'];
 
@@ -216,122 +208,6 @@ export function checkName(name: string, profile: CompanyProfile) {
     warnings: [...new Set(warnings)],
   };
 }
-
-type Direction = {
-  label: string;
-  keywords: string[];
-  products: [string, string][];
-};
-const directions: Direction[] = [
-  {
-    label: "光伏设备",
-    keywords: ["光伏", "太阳能"],
-    products: [
-      ["光伏组件安装支架", "带角度调节结构的"],
-      ["光伏板连接组件", "带滑槽限位结构的"],
-      ["光伏逆变器散热结构", "带分体式风道的"],
-    ],
-  },
-  {
-    label: "环保除尘",
-    keywords: ["环保", "除尘", "废气", "风道"],
-    products: [
-      ["除尘风道连接组件", "带卡扣连接结构的"],
-      ["除尘设备过滤组件", "带可拆卸滤框的"],
-      ["除尘器集尘箱", "带滑轨抽拉结构的"],
-    ],
-  },
-  {
-    label: "水处理设备",
-    keywords: ["净水", "水处理", "过滤", "污水"],
-    products: [
-      ["净水设备滤芯组件", "带可拆卸连接结构的"],
-      ["过滤器密封接头", "带双层密封结构的"],
-      ["水处理设备管路组件", "带分体式连接结构的"],
-    ],
-  },
-  {
-    label: "机械加工",
-    keywords: ["机床", "机械加工", "金属加工", "精密加工", "五金"],
-    products: [
-      ["机床冷却管路组件", "带可调节喷头的"],
-      ["工件定位夹具", "带滑槽限位结构的"],
-      ["机械设备防护罩", "带铰接开合结构的"],
-    ],
-  },
-  {
-    label: "食品加工设备",
-    keywords: ["食品", "粮食", "烘焙", "饮料", "果蔬"],
-    products: [
-      ["食品输送导向组件", "带可调节挡板的"],
-      ["食品搅拌设备支撑架", "带可拆卸连接结构的"],
-      ["食品加工设备防护罩", "带铰接开合结构的"],
-    ],
-  },
-  {
-    label: "纺织服装设备",
-    keywords: ["服装", "纺织", "布料", "缝纫", "制衣"],
-    products: [
-      ["布料输送导向组件", "带可调节挡板的"],
-      ["缝纫设备压料组件", "带弹性压紧结构的"],
-      ["布料卷绕支撑架", "带滑槽限位结构的"],
-    ],
-  },
-  {
-    label: "自动化设备",
-    keywords: ["自动化", "机器人", "机械手"],
-    products: [
-      ["工业机械手夹持组件", "带弹性夹爪结构的"],
-      ["输送设备定位机构", "带可调节挡板的"],
-      ["自动化设备安装支架", "带滑动连接结构的"],
-    ],
-  },
-  {
-    label: "电子电气",
-    keywords: ["电子", "电气", "电力", "电池", "储能"],
-    products: [
-      ["电气机柜散热组件", "带分层导流结构的"],
-      ["电子设备壳体", "带卡扣连接结构的"],
-      ["电池模组安装支架", "带分体式固定结构的"],
-    ],
-  },
-  {
-    label: "包装输送",
-    keywords: ["包装", "输送", "物流"],
-    products: [
-      ["包装设备导向组件", "带可调节挡板的"],
-      ["输送机张紧机构", "带螺杆调节结构的"],
-      ["物流周转箱", "带折叠连接结构的"],
-    ],
-  },
-  {
-    label: "农业设备",
-    keywords: ["农业", "农机", "种植", "灌溉"],
-    products: [
-      ["灌溉管路连接组件", "带可拆卸密封结构的"],
-      ["农机具安装支架", "带螺杆调节结构的"],
-      ["育苗托盘组件", "带分体式连接结构的"],
-    ],
-  },
-  {
-    label: "家具家居",
-    keywords: ["家具", "家居", "桌椅"],
-    products: [
-      ["家具连接组件", "带可拆卸锁紧结构的"],
-      ["桌面支撑支架", "带折叠限位结构的"],
-      ["抽屉导向组件", "带滑轨定位结构的"],
-    ],
-  },
-  {
-    label: "建筑结构",
-    keywords: ["建筑", "建材", "门窗"],
-    products: [
-      ["建筑板材连接组件", "带卡槽定位结构的"],
-      ["门窗密封组件", "带双层密封结构的"],
-      ["管道安装支架", "带螺杆调节结构的"],
-    ],
-  },
-];
 export function validateProfile(
   profile: CompanyProfile,
 ): Partial<Record<keyof CompanyProfile, string>> {
@@ -360,83 +236,6 @@ export function validateProfile(
   if (splitTerms(profile.features).some(feature => !isStructuralFeature(feature)))
     errors.features = "请选择具体的形状、部件或连接特征，不要只写功能或效果。";
   return errors;
-}
-export function generateNames(profile: CompanyProfile): {
-  candidates: Candidate[];
-  message: string;
-  field?: keyof CompanyProfile;
-} {
-  if (Object.keys(validateProfile(profile)).length)
-    return { candidates: [], message: "请先修正企业信息。" };
-  const matched = directions.filter((d) =>
-    d.keywords.some((k) => profile.business.includes(k)),
-  );
-  // Generic machinery is only a fallback, not evidence of machine-tool work.
-  if (!matched.length && profile.business.includes("机械")) {
-    matched.push({
-      label: "机械设备",
-      keywords: [],
-      products: [["机械设备防护罩", "带铰接开合结构的"]],
-    });
-  }
-  const product = profile.product.trim().replace(/^一种/u, "");
-  const features = splitTerms(profile.features);
-  const targets = product
-    ? [[product, ""]]
-    : matched.flatMap((d) => d.products);
-  if (!targets.length)
-    return {
-      candidates: [],
-      message:
-        "请写明要保护的具体装置、组件或结构（例如安装支架、连接组件、导向机构），并确认产品实际具备的形状、部件及连接特征。",
-      field: "product",
-    };
-  const candidates: Candidate[] = [];
-  const rejectedReasons = new Set<string>();
-  for (const [core, suggestedFeature] of targets) {
-    // User-provided features take precedence. Never silently remove their technical meaning.
-    const modifiers = features.length
-      ? [...features, ...(features.length === 2 ? [features.join("、")] : [])]
-      : suggestedFeature
-        ? [suggestedFeature, ""]
-        : [""];
-    for (const feature of modifiers) {
-      const modifier =
-        feature && !feature.endsWith("的") ? `${feature}的` : feature;
-      const name = `一种${modifier}${core}`;
-      const check = checkName(name, profile);
-      if (check.errors.length) {
-        check.errors.forEach((reason) => rejectedReasons.add(reason));
-        continue;
-      }
-      if (candidates.some((c) => c.name === name)) continue;
-      candidates.push({
-        name,
-        product: core,
-        feature: feature || "未添加结构限定",
-        inferred:
-          !product || (!!suggestedFeature && !features.length && !!feature),
-        basis: product
-          ? "以你填写的核心产品为依据"
-          : `根据主营业务匹配「${matched
-              .filter((d) => d.products.some((p) => p[0] === core))
-              .map((d) => d.label)
-              .join("、")}」方向`,
-      });
-    }
-  }
-  candidates.sort(
-    (a, b) =>
-      Number(countCharacters(b.name) >= 15 && countCharacters(b.name) <= 25) -
-      Number(countCharacters(a.name) >= 15 && countCharacters(a.name) <= 25),
-  );
-  return {
-    candidates: candidates.slice(0, 9),
-    message: candidates.length
-      ? ""
-      : `未生成可用候选：${[...rejectedReasons].join(" ")} 请修改结构特征、核心产品或排除词后重试。`,
-    field: candidates.length ? undefined : features.length ? "features" : profile.excludedTerms.trim() ? "excludedTerms" : "product",
-  };
 }
 
 export function isNamingRecord(value: unknown): value is NamingRecord {

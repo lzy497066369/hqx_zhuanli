@@ -5,7 +5,8 @@
 ## 文件
 
 - `Dockerfile`：两阶段构建。阶段 1 用 `node:22-bookworm` 跑 `npm run build`；阶段 2 安装 Debian 自带的 `freecad`（0.20，含 `freecadcmd`），只装生产依赖，以非 root 用户运行。
-- `docker-compose.yml`：端口只绑到宿主机 `127.0.0.1:4173`，内存上限 3 GB，`/tmp` 使用 tmpfs（FreeCAD 临时目录在此，用后即删）。
+- `docker-compose.yml`：应用容器只绑宿主机 `127.0.0.1:4173`；另起 `gateway`（Caddy）绑局域网网卡 `192.168.0.58:80`，做账号鉴权后转发。内存上限 3 GB，`/tmp` 使用 tmpfs（FreeCAD 临时目录在此，用后即删）。
+- `deploy/Caddyfile`：网关配置。`.env`（项目根，已被 git 忽略）：网关账号、来源白名单等 compose 插值变量。
 - `.dockerignore`：排除 `node_modules`、测试产物、压缩包和 `.env*`。
 
 ## 服务端为容器新增的两个环境变量
@@ -42,24 +43,50 @@ docker compose exec zhichuang sh -c 'printf "import Part\nprint(Part.makeBox(1,1
 
 应打印版本号和 `1.0`。应用内再跑一次完整流程，确认 CAD 阶段不再返回 `FREECAD_UNAVAILABLE`。
 
-## 对外发布（可选）
+## 局域网发布（gateway 网关）
 
-默认只绑定宿主机回环地址。要给局域网或公网使用：
+`docker compose up -d` 会同时起 `gateway` 容器（Caddy），它是唯一的对外入口：
 
-1. 在宿主机放一层反向代理（Caddy / Nginx）做 HTTPS，把 `https://你的域名` 转发到 `127.0.0.1:4173`，并转发 `X-Forwarded-Proto`。
-2. `ALLOWED_ORIGINS` 改为 `https://你的域名`。
-3. **必须**在代理层加鉴权（Basic Auth / OIDC 等）。服务端目前只有同源检查和本进程内的并发/频率限制，没有账户体系；生图与 CAD 都是付费和耗 CPU 的操作，不能裸露公网。
+- 只绑局域网网卡 `192.168.0.58:80`，只有本网段能连到；该地址是私有地址，公网没有路由就不会暴露。
+- 进入前必须通过 Basic Auth，账号来自 `.env` 的 `BASIC_AUTH_USER` / `BASIC_AUTH_HASH`。
+- 鉴权后转发到应用容器 `zhichuang:4173`；应用容器自身仍只绑宿主机回环，仅本机调试用。
 
-Caddy 示例：
+访问地址 `http://192.168.0.58/`。登录账号与口令由本机管理员配置，凭据保存在被 Git 忽略的本机环境文件中。
 
+### 换账号口令
+
+```sh
+docker run --rm caddy:2-alpine caddy hash-password --plaintext '新口令'
 ```
-patent.example.com {
-    basicauth {
-        admin $2a$14$替换成caddy_hash_password生成的哈希
-    }
-    reverse_proxy 127.0.0.1:4173
-}
+
+把输出填回 `.env` 的 `BASIC_AUTH_HASH`（哈希里的 `$` 必须写成 `$$`），再重启网关：
+
+```sh
+docker compose up -d gateway
 ```
+
+### 本机 IP 变化
+
+`docker-compose.yml` 里 gateway 的 `ports` 写死了 `192.168.0.58:80:80`。IP 变了要同步改这一行，
+并更新 `.env` 的 `ALLOWED_ORIGINS`，然后 `docker compose up -d`。建议在路由器上给本机做 DHCP 保留。
+
+本机 Windows 防火墙三个配置文件目前都是关闭状态，所以没有额外规则拦 80 端口；若以后启用防火墙，需为 80 端口放行本网段。
+
+### 为什么不用 remote_ip 限制来源网段
+
+网关跑在 Docker Desktop 里，端口转发会把客户端来源 IP 统一改写成 docker 网桥地址。实测宿主机访问、
+局域网 IP 访问、其他容器访问三条路径，容器内看到的都是 `172.17.0.1`。因此 Caddy 的 `remote_ip`
+匹配无法区分内外网来源，网段限制只能靠绑定局域网网卡实现。
+
+### 对外开放到公网
+
+当前方案不含公网入口。确实需要时：
+
+1. 在路由器上把公网端口映射到 `192.168.0.58:80`，或改用内网穿透隧道。
+2. gateway 的 `ports` 改成 `80:80`，`SITE_ADDRESS` 改成域名，让 Caddy 自动申请 Let's Encrypt 证书。
+3. 换掉弱口令，并确认 `.env` 的 `ALLOWED_ORIGINS` 加上公网来源。
+
+生图与 CAD 都是付费和耗 CPU 的操作，裸露公网前务必先做这三点。
 
 ## 资源与并发
 

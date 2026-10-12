@@ -105,13 +105,13 @@ test('跨服务回退：检索使用备用服务，生成仍使用主服务', as
 
 test('联网检索回退：前两级不可用时尝试第二备用模型', async () => {
   const calls: string[] = [];
-  const result = await generateDrawingPlan(input, { ...config, researchModel: 'gpt-6-astra', fallbackModel: 'gpt-6-sol', secondFallbackModel: 'gpt-5.6-sol' }, new AbortController().signal, stub((url, init) => {
+  const result = await generateDrawingPlan(input, { ...config, researchModel: 'gpt-6.1-sol', fallbackModel: 'gpt-6-sol', secondFallbackModel: 'gpt-6-astra' }, new AbortController().signal, stub((url, init) => {
     const body = JSON.parse(String(init?.body));
     calls.push(`${url.endsWith('/responses') ? 'responses' : 'chat'}:${body.model}`);
-    if (url.endsWith('/responses')) return body.model === 'gpt-5.6-sol' ? Response.json(providerResearchFixture()) : new Response('rate limited', { status: 429 });
+    if (url.endsWith('/responses')) return body.model === 'gpt-6-astra' ? Response.json(providerResearchFixture()) : new Response('rate limited', { status: 429 });
     return completion();
   }));
-  expect(calls).toEqual(['responses:gpt-6-astra', 'responses:gpt-6-sol', 'responses:gpt-5.6-sol', `chat:${config.model}`]);
+  expect(calls).toEqual(['responses:gpt-6.1-sol', 'responses:gpt-6-sol', 'responses:gpt-6-astra', `chat:${config.model}`]);
   expect(result.research?.sources[0].publication).toBe('CN217307583U');
 });
 

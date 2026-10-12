@@ -193,14 +193,13 @@ function UtilityNamingForm({
   const canSave =
     !!draft.selectedName &&
     !validation.errors.length &&
-    draft.confirmed &&
     !!draft.structureSelection?.confirmed &&
     !missingStructureEvidenceCategories(draft.structureSelection).length &&
     !Object.keys(validateProfile(profile)).length;
   // External storage may be unavailable; expose the failure rather than claiming persistence.
   // 防抖：输入每个字符都写一次 IndexedDB 会与项目写入争抢同一 store。
-  // 持久化时清除 confirmed：确认是「本次保存动作」的前提，不该被草稿自动落库预置，
-  // 否则重新打开页面时进入工作区的门禁条件已被满足。
+  // 持久化时清除 confirmed：该字段表示「名称已由用户保存确认」，只应随保存动作写入项目记录，
+  // 草稿不应携带，避免重新打开页面时被误判为已保存。
   useEffect(() => {
     let cancelled = false;
     const timer = setTimeout(() => {
@@ -225,7 +224,6 @@ function UtilityNamingForm({
       candidates: [],
       structureOptions: undefined, structureSelection: undefined,
       selectedName: "",
-      confirmed: false,
     }));
     setErrors((e) => ({ ...e, [key]: undefined }));
     setMessage("");
@@ -264,7 +262,7 @@ function UtilityNamingForm({
         () => { if (version === requestVersion.current) setFeedback({ kind: 'success', text: '请求受限，5 秒后自动重试一次…' }); });
       if (version !== requestVersion.current) return;
       setOptions(result.options);
-      setDraft(d => ({ ...d, options: result.options, profile: { ...d.profile, product: '', features: '', improvementType: undefined }, candidates: [], selectedName: '', confirmed: false, structureOptions: undefined, structureSelection: undefined }));
+      setDraft(d => ({ ...d, options: result.options, profile: { ...d.profile, product: '', features: '', improvementType: undefined }, candidates: [], selectedName: '', structureOptions: undefined, structureSelection: undefined }));
       setFeedback({ kind: 'success', text: `已生成 ${result.options.length} 组具体产品建议，请核对并选择实际具备的结构特征。` });
     } catch (cause) {
       if (signal.aborted) return;
@@ -273,14 +271,14 @@ function UtilityNamingForm({
   };
   const selectOption = (option: ProductOption) => {
     invalidateRequests();
-    setDraft(d => ({ ...d, profile: { ...d.profile, product: option.product, features: '', improvementType: undefined }, candidates: [], selectedName: '', confirmed: false, structureOptions: undefined, structureSelection: undefined }));
+    setDraft(d => ({ ...d, profile: { ...d.profile, product: option.product, features: '', improvementType: undefined }, candidates: [], selectedName: '', structureOptions: undefined, structureSelection: undefined }));
     setMessage(''); setFeedback(null); setSaved(false); setTitleOpen(false);
   };
   const toggleFeature = (feature: string) => {
     invalidateRequests();
     const features = profile.features.split('、').filter(Boolean);
     const next = features.includes(feature) ? features.filter(item => item !== feature) : [...features, feature];
-    setDraft(d => ({ ...d, profile: { ...d.profile, features: next.join('、') }, candidates: [], selectedName: '', confirmed: false, structureOptions: undefined, structureSelection: undefined }));
+    setDraft(d => ({ ...d, profile: { ...d.profile, features: next.join('、') }, candidates: [], selectedName: '', structureOptions: undefined, structureSelection: undefined }));
     setMessage(''); setFeedback(null); setSaved(false); setTitleOpen(false); setBusy(null);
   };
   const generateEvidence = async () => {
@@ -292,13 +290,13 @@ function UtilityNamingForm({
     const { version, signal } = beginRequest();
     setBusy('evidence'); setFeedback(null);
     setProgressSteps([{ label: '提交结构输入', detail: '正在连接生成服务' }]);
-    setDraft(d => ({ ...d, structureOptions: undefined, structureSelection: undefined, candidates: [], selectedName: '', confirmed: false }));
+    setDraft(d => ({ ...d, structureOptions: undefined, structureSelection: undefined, candidates: [], selectedName: '' }));
     try {
       const result = await postNaming<{ options: StructureEvidenceOption[] }>('/api/utility/structure-evidence-options', { profile }, progressFor(version), signal,
         () => { if (version === requestVersion.current) setFeedback({ kind: 'success', text: '请求受限，5 秒后自动重试一次…' }); });
       if (version !== requestVersion.current) return;
       if (!isStructureEvidenceOptions(result.options, ['component', 'relationship', 'motion', 'geometry', 'problem'])) throw new Error('结构资料选项不完整，请重新生成。');
-      setDraft(d => ({ ...d, structureOptions: result.options, structureSelection: { version: 1, options: result.options, selectedIds: [], confirmed: false }, candidates: [], selectedName: '', confirmed: false }));
+      setDraft(d => ({ ...d, structureOptions: result.options, structureSelection: { version: 1, options: result.options, selectedIds: [], confirmed: false }, candidates: [], selectedName: '' }));
       setSaved(false); setTitleOpen(false);
       setFeedback({ kind: 'success', text: '请逐项核对结构资料，仅勾选实际具备的内容。' });
     } catch (cause) {
@@ -309,7 +307,7 @@ function UtilityNamingForm({
   const toggleEvidence = (id: string) => {
     setDraft(d => ({ ...d, structureSelection: d.structureSelection ? {
       ...d.structureSelection, selectedIds: d.structureSelection.selectedIds.includes(id) ? d.structureSelection.selectedIds.filter(value => value !== id) : [...d.structureSelection.selectedIds, id], confirmed: false,
-    } : undefined, candidates: [], selectedName: '', confirmed: false }));
+    } : undefined, candidates: [], selectedName: '' }));
     setSaved(false); setTitleOpen(false);
   };
   const generateNames = async () => {
@@ -326,7 +324,7 @@ function UtilityNamingForm({
       const result = await postNaming<{ candidates: NamingRecord['candidates'] }>("/api/utility/naming-names", { profile, structureEvidence: draft.structureSelection, previous: draft.candidates.map(item => item.name) }, progressFor(version), signal,
         () => { if (version === requestVersion.current) setFeedback({ kind: 'success', text: '请求受限，5 秒后自动重试一次…' }); });
       if (version !== requestVersion.current) return;
-      setDraft(d => ({ ...d, candidates: result.candidates, selectedName: '', confirmed: false }));
+      setDraft(d => ({ ...d, candidates: result.candidates, selectedName: '' }));
       setTitleOpen(false); setSaved(false);
       setFeedback({ kind: 'success', text: `已生成 ${result.candidates.length} 个名称候选，请选择并确认。` });
       requestAnimationFrame(() => resultRef.current?.focus());
@@ -489,7 +487,7 @@ function UtilityNamingForm({
                 <p className="un-hint">请只选择产品实际具备的结构；推荐项仅表示更利于生成结构模型，仍需按实物或图纸核对。</p>
               </fieldset>}
               {profile.product && <fieldset className="un-feature-fieldset"><legend>改进类型 · 选择一项</legend>
-                {(() => { const recommended = improvementRecommendation(profile.features.split('、').filter(Boolean)); return (Object.entries(improvementTypes) as [keyof typeof improvementTypes, string][]).map(([type, label]) => <label key={type} className="un-feature"><input type="radio" name="improvement-type" checked={profile.improvementType === type} onChange={() => { invalidateRequests(); setDraft(d => ({ ...d, profile: { ...d.profile, improvementType: type }, candidates: [], selectedName: '', confirmed: false, structureOptions: undefined, structureSelection: undefined })); setBusy(null); setSaved(false); setTitleOpen(false); }} disabled={!!busy} /><span>{label}{recommended.type === type && <small className="un-recommendation"><Lightbulb size={13} />推荐：{recommended.reason}</small>}</span></label>); })()}
+                {(() => { const recommended = improvementRecommendation(profile.features.split('、').filter(Boolean)); return (Object.entries(improvementTypes) as [keyof typeof improvementTypes, string][]).map(([type, label]) => <label key={type} className="un-feature"><input type="radio" name="improvement-type" checked={profile.improvementType === type} onChange={() => { invalidateRequests(); setDraft(d => ({ ...d, profile: { ...d.profile, improvementType: type }, candidates: [], selectedName: '', structureOptions: undefined, structureSelection: undefined })); setBusy(null); setSaved(false); setTitleOpen(false); }} disabled={!!busy} /><span>{label}{recommended.type === type && <small className="un-recommendation"><Lightbulb size={13} />推荐：{recommended.reason}</small>}</span></label>); })()}
                 <p className="un-hint">形状对应可辨认的外形或截面；构造对应部件安排与连接；结合须两者共同作用。推荐不替代对实物或图纸的确认。</p>
               </fieldset>}
               {!!draft.structureOptions?.length && <fieldset className="un-evidence-fieldset"><legend>结构资料 · 选择实际具备的内容</legend>
@@ -634,7 +632,6 @@ function UtilityNamingForm({
                       setDraft((d) => ({
                         ...d,
                         selectedName: candidate.name,
-                        confirmed: false,
                       }));
                       setSaved(false);
                       setTitleOpen(true);
@@ -696,7 +693,6 @@ function UtilityNamingForm({
                   setDraft((d) => ({
                     ...d,
                     selectedName: e.target.value,
-                    confirmed: false,
                   }));
                   setSaved(false);
                 }}
@@ -730,19 +726,6 @@ function UtilityNamingForm({
                   保护客体：{selected.product} · {profile.improvementType ? `${improvementTypes[profile.improvementType]} · ` : ''}结构限定：{selected.feature}
                 </p>
               )}
-              <label className="un-confirm-check">
-                <input
-                  type="checkbox"
-                  checked={draft.confirmed}
-                  onChange={(e) => {
-                    setDraft((d) => ({ ...d, confirmed: e.target.checked }));
-                    setSaved(false);
-                  }}
-                />
-                <span>
-                  我已确认名称与真实产品的形状、构造或连接关系一致，不含品牌、人名、型号或宣传用语；其中的建议特征确实存在。
-                </span>
-              </label>
               <div className="un-save-row">
                 <span>
                   {saved
@@ -754,14 +737,14 @@ function UtilityNamingForm({
                   disabled={!canSave || saved}
                   onClick={() => {
                     if (!canSave) return;
-                    onSave(draft);
+                    onSave({ ...draft, confirmed: true });
                     setSaved(true);
                   }}
                 >
                   <Check size={16} />
                   {saved ? "已保存名称" : "确认名称并检查产品逻辑"}
                 </button>
-                {(saved || (project && draft.selectedName === project.name && draft.confirmed)) && onOpenWorkspace && (
+                {(saved || (project && draft.selectedName === project.name)) && onOpenWorkspace && (
                   <button className="button secondary" onClick={onOpenWorkspace}>
                     <PencilRuler size={16} />
                     进入产品预览与材料工作区

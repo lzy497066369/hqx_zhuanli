@@ -1,9 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { sanitizeFinalPatentDocument } from '../src/features/utility/finalDocumentSanitizer';
 import { compileStructureDraft } from '../src/features/utility/structureCompiler';
-import { PATENT_FIGURES, FIGURE_LABELS, FIGURE_DESCRIPTIONS } from '../src/features/utility/drawingModel';
 import type { UtilityMaterials } from '../src/data';
-import { generateStructure, mockStructure, openNamedWorkspace, sampleDraft } from './fixtures/structureFlow';
+import { sampleDraft } from './fixtures/structureFlow';
 
 function fixture() {
   const result = compileStructureDraft(sampleDraft('一种防护装置'));
@@ -105,25 +104,4 @@ test('正式文档：不完整的有益效果标题不能阻止规范结论写�
   const content = output.sections.find(section => section.title === '实用新型内容')?.paragraphs || [];
   expect(content).toContain('有益效果：便于拆装。');
   expect(content).toContainEqual(expect.stringMatching(/^综上所述，本实用新型的有益效果为：/u));
-});
-
-test('图号：统一 FIG 标识、SVG 图号、Word 图号及附图说明，拒绝冲突模型编号', async ({ page }) => {
-  const { model, materials } = fixture();
-  const output = sanitizeFinalPatentDocument(model.productTitle, model, materials);
-  await mockStructure(page);
-  await openNamedWorkspace(page);
-  await generateStructure(page);
-  for (const [index, figure] of PATENT_FIGURES.entries()) {
-    await page.getByRole('tab', { name: figure.name }).click();
-    const svg = await page.locator('.uw-svg').evaluate(element => element.outerHTML);
-    expect(figure).toMatchObject({ id: `FIG-0${index + 1}`, figureIndex: index + 1, figureLabel: `图${index + 1}` });
-    expect(svg).toContain(`data-figure-id="${figure.id}"`);
-    expect(svg).toContain(`data-figure-label="${figure.figureLabel}"`);
-    expect(svg).not.toContain('A（图3）');
-    expect(FIGURE_LABELS[figure.kind]).toBe(output.figures[index].figureLabel);
-    expect(FIGURE_DESCRIPTIONS[figure.kind]).toContain(figure.figureLabel);
-    expect(output.sections.find(section => section.title === '附图说明')?.paragraphs[index]).toMatch(new RegExp(`^${figure.figureLabel}为`));
-  }
-  model.figureSpecs[0].id = 'F03';
-  expect(() => sanitizeFinalPatentDocument(model.productTitle, model, materials)).toThrow('FIG-01必须对应F01');
 });

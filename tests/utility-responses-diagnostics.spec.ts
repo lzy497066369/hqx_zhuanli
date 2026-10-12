@@ -7,8 +7,8 @@ import { responsesDiagnosticsFixture, syntheticSecrets } from './fixtures/respon
 import { createStrictTransport } from './support/strictE2eTransport.mjs';
 import { createStrictResearchInvocation, strictResearchConfig, strictResearchPolicy } from './support/strictResearchPolicy.ts';
 
-const config: AiConfig = { baseUrl: 'https://provider.invalid/v1', apiKey: 'OFFLINE_KEY', model: 'gpt-6-astra',
-  researchModel: 'gpt-6-astra', researchProtocol: 'responses', fallbackModel: 'gpt-6-sol', secondFallbackModel: 'gpt-5.6-sol',
+const config: AiConfig = { baseUrl: 'https://provider.invalid/v1', apiKey: 'OFFLINE_KEY', model: 'gpt-6.1-sol',
+  researchModel: 'gpt-6.1-sol', researchProtocol: 'responses', fallbackModel: 'gpt-6-sol', secondFallbackModel: 'gpt-6-astra',
   fallbackBaseUrl: 'https://fallback.invalid/v1', fallbackApiKey: 'OFFLINE_FALLBACK_KEY',
   secondFallbackBaseUrl: 'https://second.invalid/v1', secondFallbackApiKey: 'OFFLINE_SECOND_KEY' };
 const input = { title: '光伏组件安装支架', technicalField: '机械安装结构', structure: '', workingPrinciple: '' };
@@ -106,9 +106,9 @@ test('existing Anthropic summary remains separate and retains unavailable reject
 
 test('production fallback providers are unchanged; strict config is a nonmutating primary-only copy', async () => {
   const before = structuredClone(config);
-  expect(aiProviders(config, config.researchModel).map(provider => provider.model)).toEqual(['gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-sol']);
+  expect(aiProviders(config, config.researchModel).map(provider => provider.model)).toEqual(['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-astra']);
   const pinned = strictResearchConfig(config);
-  expect(aiProviders(pinned, pinned.researchModel).map(provider => provider.model)).toEqual(['gpt-6-astra']);
+  expect(aiProviders(pinned, pinned.researchModel).map(provider => provider.model)).toEqual(['gpt-6.1-sol']);
   expect(config).toEqual(before);
   expect(pinned.fallbackApiKey).toBeUndefined();
   expect(pinned.secondFallbackApiKey).toBeUndefined();
@@ -126,7 +126,7 @@ test('strict invocation starts at zero and delegates one unchanged Responses req
       expect(String(url)).toBe('https://provider.invalid/v1/responses');
       expect(init?.redirect).toBe('error');
       const body = JSON.parse(String(init?.body));
-      expect(body).toMatchObject({ model: 'gpt-6-astra', stream: false, tool_choice: 'required',
+      expect(body).toMatchObject({ model: 'gpt-6.1-sol', stream: false, tool_choice: 'required',
         tools: [{ type: 'web_search', filters: { allowed_domains: ['patents.google.com'] } }], include: ['web_search_call.action.sources'] });
       return jsonResponse(responsesDiagnosticsFixture());
     } });
@@ -181,7 +181,7 @@ function transportForTest(fetcher: typeof fetch) {
   return createStrictTransport({ baseUrl: config.baseUrl, model: config.model, researchModel: config.researchModel || config.model,
     researchProtocol: 'responses', researchOnly: true, fetcher });
 }
-const requestOptions = (model = 'gpt-6-astra') => ({ method: 'POST', redirect: 'error' as const,
+const requestOptions = (model = 'gpt-6.1-sol') => ({ method: 'POST', redirect: 'error' as const,
   body: JSON.stringify({ model, tools: [{ type: 'web_search' }] }) });
 
 test('strict shared counter blocks a hidden second dispatch without delegating', async () => {

@@ -20,13 +20,3 @@ export function actualFigureMarkers(design: ContentDesign, model?: PatentStructu
   return VIEWS.map(view => figureLabels(createFigure(assembly, view))
     .map(label => label.componentId).filter((id): id is string => !!id));
 }
-
-/** Compatibility entry point: rendered views never alter the compiled structure. */
-export function alignFigureSpecsToRenderedModel(model: PatentStructureModel, _design: ContentDesign): PatentStructureModel {
-  return model;
-}
-
-/**
- * The model is the authority for figure specs. Rendering may validate a model,
- * but it must never rewrite the model from the rendered marker order.
- */

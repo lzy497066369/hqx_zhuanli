@@ -1,7 +1,6 @@
 import type { ComponentSpec } from './contentDrawing.ts';
 import { geometryDimensions, geometryShapeLabels, isGeometrySpec } from './geometrySpec.ts';
 import type { PatentShape } from './geometrySpec.ts';
-import type { PatentResearch } from './patentResearch.ts';
 import { improvementTypes } from './naming.ts';
 import type { ImprovementType } from './naming.ts';
 import type { StructureEvidenceSelection } from './structureEvidence.ts';
@@ -191,16 +190,6 @@ export type StructurePlanInput = {
   candidate: InnovationNameCandidate;
   /** New UI flows set this. Omitted for compatibility with legacy callers. */
   requireEvidence?: boolean;
-};
-
-export type PatentStructureResponse = {
-  model: PatentStructureModel;
-  candidate: InnovationNameCandidate;
-  source: string;
-  researchSummary: string;
-  research: PatentResearch;
-  providerModel: string;
-  generatedAt: string;
 };
 
 export type PatentStructureBuildInput = {

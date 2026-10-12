@@ -55,7 +55,6 @@ export const PATENT_FIGURES = ([
   sourceId: `F${String(index + 1).padStart(2, "0")}`,
   name: `图 ${index + 1} · ${name}`,
 }));
-export const FIGURE_NAMES = Object.fromEntries(PATENT_FIGURES.map(item => [item.kind, item.name])) as Record<Figure, string>;
 export const FIGURE_LABELS = Object.fromEntries(PATENT_FIGURES.map(item => [item.kind, item.figureLabel])) as Record<Figure, string>;
 
 // The supplied historical drawings are treated as visual conventions only:
@@ -389,11 +388,6 @@ export function boundsOf(parts: ProjectedPart[], padding = 0): Bounds {
   const x = Math.min(...xs) - padding;
   const y = Math.min(...ys) - padding;
   return { x, y, width: Math.max(...xs) + padding - x, height: Math.max(...ys) + padding - y };
-}
-
-export function contains(bounds: Bounds, point: Vec2) {
-  return point[0] >= bounds.x && point[0] <= bounds.x + bounds.width &&
-    point[1] >= bounds.y && point[1] <= bounds.y + bounds.height;
 }
 
 export function createFigure(model: AssemblyModel, figure: Figure) {

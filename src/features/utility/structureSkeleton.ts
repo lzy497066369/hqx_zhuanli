@@ -313,6 +313,3 @@ export function buildStructureDraftFromSkeleton(input: { brief: ProductBrief; ca
   if (!normalized.success) return { success: false, errors: normalized.errors };
   return { success: true, draft: normalized.draft };
 }
-
-export const structureSkeletonShapeOptions = [...shapeTypes];
-export const structureSkeletonRelationOptions = [...relationTypes];

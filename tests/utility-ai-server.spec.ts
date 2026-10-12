@@ -123,15 +123,15 @@ test('AI 回退：主设计模型成功时不调用备用模型', async () => {
 
 test('AI 回退：两级备用模型按序使用同一服务端凭据', async () => {
   const calls: string[] = [];
-  const result = await generateDrawingPlan(input, { ...config, model: 'gpt-6-sol', fallbackModel: 'gpt-6-astra', secondFallbackModel: 'gpt-5.6-sol' }, new AbortController().signal, stub((url, init) => {
+  const result = await generateDrawingPlan(input, { ...config, model: 'gpt-6.1-sol', fallbackModel: 'gpt-6-sol', secondFallbackModel: 'gpt-6-astra' }, new AbortController().signal, stub((url, init) => {
     expect(url).toBe(`${config.baseUrl}/chat/completions`);
     expect(new Headers(init?.headers).get('Authorization')).toBe(`Bearer ${config.apiKey}`);
     const model = JSON.parse(String(init?.body)).model;
     calls.push(model);
-    return model === 'gpt-5.6-sol' ? envelope() : new Response('unavailable', { status: 503 });
+    return model === 'gpt-6-astra' ? envelope() : new Response('unavailable', { status: 503 });
   }));
-  expect(calls).toEqual(['gpt-6-sol', 'gpt-6-astra', 'gpt-5.6-sol']);
-  expect(result.model).toBe('gpt-5.6-sol');
+  expect(calls).toEqual(['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-astra']);
+  expect(result.model).toBe('gpt-6-astra');
 });
 
 test('AI 安全：同源本机限制、方法/类型/大小校验、不配置时明确失败', async () => {

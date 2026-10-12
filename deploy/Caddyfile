@@ -1,0 +1,26 @@
+# 知创工坊局域网网关：Basic Auth 鉴权 + 转发到应用容器。
+#
+# 来源网段限制说明：本网关跑在 Docker Desktop 里，端口转发会把客户端来源 IP
+# 统一改写成 docker 网桥地址（实测宿主机访问、局域网 IP 访问、其他容器访问
+# 看到的都是 172.17.0.1），所以 Caddy 的 remote_ip 匹配无法区分内外网来源，
+# 这里不使用它。网段限制由 docker-compose 中"只绑局域网网卡"实现：
+#   ports: - "192.168.0.58:80:80"
+# 本机 IP 变化后要同步改那一行（建议在路由器上给本机做 DHCP 保留）。
+#
+# SITE_ADDRESS：默认 :80，即局域网 HTTP 访问。
+{
+	admin off
+}
+
+{$SITE_ADDRESS} {
+	# 共享账号；凭据来自同目录 .env 的 BASIC_AUTH_USER / BASIC_AUTH_HASH。
+	basic_auth {
+		{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+	}
+
+	encode gzip
+
+	# 保留原始 Host；应用按 ALLOWED_ORIGINS 做同源校验，
+	# 所以 docker-compose 里的 ALLOWED_ORIGINS 必须包含实际访问地址。
+	reverse_proxy zhichuang:4173
+}

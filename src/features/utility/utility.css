@@ -500,25 +500,6 @@
   line-height: 1.8;
   margin-top: 8px;
 }
-.utility-naming .un-confirm-check {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  font-size: 11px;
-  line-height: 1.9;
-  color: var(--un-muted);
-  padding: 13px;
-  background: var(--un-soft);
-  border-radius: 7px;
-  margin: 19px 0;
-}
-.un-confirm-check input {
-  accent-color: var(--primary);
-  width: 17px;
-  height: 17px;
-  flex-shrink: 0;
-  margin: 2px 0 0;
-}
 .un-save-row {
   display: flex;
   align-items: center;

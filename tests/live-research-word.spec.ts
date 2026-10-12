@@ -58,7 +58,7 @@ test('REAL Research → Evidence → confirmed Compiler → V2 → Freeze → Wo
       if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify([project]));
     }, { key: STORAGE_KEY, project: userProject() });
     await page.goto('/#utility/phase4-live-user-input');
-    await page.getByRole('button', { name: '进入结构与材料工作区' }).click();
+    await page.getByRole('button', { name: '进入产品预览与材料工作区' }).click();
     const close = page.getByRole('button', { name: '关闭提示', exact: true });
     if (await close.isVisible()) await close.click();
     stage = 'research-and-skeleton';
