@@ -71,6 +71,61 @@ export async function responseText(response: Response, limit = 256 * 1024) {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+export type ChatChoice = { finish_reason?: string; message?: { content?: unknown; refusal?: unknown } };
+const CHAT_CONTENT_LIMIT = 256 * 1024;
+const CHAT_STREAM_RAW_LIMIT = 16 * 1024 * 1024;
+
+/**
+ * 读取 chat/completions 响应，统一成非流式的 choice 形状。
+ * 为什么要流式：实测中转站对"长时间没有任何响应字节"的连接约 125 秒就主动关闭（other side closed），
+ * 而非流式请求在模型生成完之前上游一个字节都不发，长文必死；流式下 2 秒就有响应头、生成期间持续有数据，
+ * 同一请求 156 秒完整返回。SSE 里把 delta.content / delta.refusal 拼回去，finish_reason 取最后一个非空值。
+ * 上游若忽略 stream 直接回 JSON，也按原来的方式解析。
+ */
+export async function readChatChoice(response: Response): Promise<ChatChoice | undefined> {
+  const contentType = response.headers.get('Content-Type') || '';
+  if (!contentType.includes('text/event-stream')) {
+    const envelope = JSON.parse(await responseText(response)) as { choices?: ChatChoice[] } | null;
+    return envelope?.choices?.[0];
+  }
+  if (!response.body) throw new AiFailure(502, 'AI_EMPTY', 'AI 服务返回空内容，请稍后重试。');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '', content = '', refusal = '', rawSize = 0, sawChoice = false;
+  let finishReason: string | undefined;
+  const handleLine = (line: string) => {
+    if (!line.startsWith('data:')) return;
+    const data = line.slice(5).trim();
+    if (!data || data === '[DONE]') return;
+    let chunk: { error?: unknown; choices?: { delta?: { content?: unknown; refusal?: unknown }; finish_reason?: unknown }[] } | null;
+    try { chunk = JSON.parse(data); } catch { throw new AiFailure(502, 'AI_INVALID_JSON', 'AI 流式返回格式不正确，未采用该结果；请稍后重试。'); }
+    if (chunk?.error) throw new AiFailure(502, 'AI_UPSTREAM', 'AI 服务调用失败，请检查服务状态、模型配置或稍后重试。');
+    const choice = chunk?.choices?.[0];
+    if (!choice) return;
+    sawChoice = true;
+    if (typeof choice.delta?.content === 'string') content += choice.delta.content;
+    if (typeof choice.delta?.refusal === 'string') refusal += choice.delta.refusal;
+    if (typeof choice.finish_reason === 'string' && choice.finish_reason) finishReason = choice.finish_reason;
+    if (content.length > CHAT_CONTENT_LIMIT) throw new AiFailure(502, 'AI_TOO_LARGE', 'AI 返回内容过长，请缩小技术方案范围后重试。');
+  };
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      rawSize += value.length;
+      if (rawSize > CHAT_STREAM_RAW_LIMIT) throw new AiFailure(502, 'AI_TOO_LARGE', 'AI 返回内容过长，请缩小技术方案范围后重试。');
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? '';
+      for (const line of lines) handleLine(line);
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) handleLine(buffer);
+  } finally { await reader.cancel().catch(() => {}); }
+  if (!sawChoice) throw new AiFailure(502, 'AI_EMPTY', 'AI 服务返回空内容，请稍后重试。');
+  return { finish_reason: finishReason, message: { content, ...(refusal ? { refusal } : {}) } };
+}
+
 // 失败 provider 熔断：短时间内失败过的 provider 进入冷却，后续请求直接跳过，
 // 避免每个请求都先等故障 provider 超时一遍再切换。冷却只影响 provider 选择
 // 顺序，不影响单次请求内的故障转移；全部冷却中时不跳过任何一个。

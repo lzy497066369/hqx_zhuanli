@@ -3,7 +3,7 @@ import type { ProductBrief, InnovationNameCandidate, InnovationCandidatesRespons
 import { isInnovationNameCandidate, isProductBrief, normalizeStructureFacts, patentStructureSource } from '../src/features/utility/patentStructure.ts';
 import type { PatentResearch } from '../src/features/utility/patentResearch.ts';
 import type { AiConfig } from './aiSupport.ts';
-import { AiFailure, AI_USER_AGENT, aiProviders, generationProviders, isTransientNetworkError, markProviderFailed, markProviderSucceeded, responseText, shouldCoolDownProvider } from './aiSupport.ts';
+import { AiFailure, AI_USER_AGENT, aiProviders, generationProviders, isTransientNetworkError, markProviderFailed, markProviderSucceeded, readChatChoice, shouldCoolDownProvider } from './aiSupport.ts';
 import { researchPatents } from './patentResearch.ts';
 import { isStructureDraft } from '../src/features/utility/structureDraft.ts';
 import { normalizeStructureDraft } from '../src/features/utility/structureDraftNormalizer.ts';
@@ -280,7 +280,8 @@ export async function chatJson(prompt: string, input: unknown, config: AiConfig,
         const response = await fetcher(`${provider.baseUrl}/chat/completions`, {
           method: 'POST', redirect: 'error', signal: requestSignal,
           headers: { Authorization: `Bearer ${provider.apiKey}`, 'Content-Type': 'application/json', 'User-Agent': AI_USER_AGENT },
-          body: JSON.stringify({ model: provider.model, stream: false, max_completion_tokens: tokenBudget, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: images.length ? [{ type: 'text', text: JSON.stringify(input) }, ...images.map(url => ({ type: 'image_url', image_url: { url } }))] : JSON.stringify(input) }] }),
+          // 流式：中转站对长时间无响应字节的连接约 125 秒就关闭，非流式长文必死；strict 测试策略固定为非流式。
+          body: JSON.stringify({ model: provider.model, stream: !strict, max_completion_tokens: tokenBudget, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: images.length ? [{ type: 'text', text: JSON.stringify(input) }, ...images.map(url => ({ type: 'image_url', image_url: { url } }))] : JSON.stringify(input) }] }),
         });
         httpStatus = response.status;
         if (!response.ok) {
@@ -290,8 +291,7 @@ export async function chatJson(prompt: string, input: unknown, config: AiConfig,
           if (response.status === 429) throw new AiFailure(429, 'AI_RATE_LIMIT', 'AI 服务额度不足或请求过于频繁，请检查额度或稍后重试。');
           throw new AiFailure(502, 'AI_UPSTREAM', 'AI 服务调用失败，请检查服务状态、模型配置或稍后重试。');
         }
-        const envelope = JSON.parse(await responseText(response)) as { choices?: { finish_reason?: string; message?: { content?: unknown; refusal?: unknown } }[] } | null;
-        const choice = envelope?.choices?.[0];
+        const choice = await readChatChoice(response);
         finishReason = choice?.finish_reason;
         if (options?.logCompletion) logCompletion(provider.model, response.status, choice?.finish_reason);
         if (!strict && choice?.finish_reason === 'length' && phase !== 'length' && options?.lengthRetry && !lengthRetryUsed && !choice.message?.refusal) {

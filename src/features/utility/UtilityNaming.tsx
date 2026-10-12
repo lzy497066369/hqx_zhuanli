@@ -73,8 +73,8 @@ function evidenceRecommendation(category: StructureEvidenceCategory): string {
     problem: '可作为结构效果对应的问题线索，辅助完善说明。',
   }[category];
 }
-// 服务端命名单次调用预算 120 秒；名称生成在修复路径下是两次串行调用（最长约 240 秒），客户端超时必须覆盖该最坏情况。
-const NAMING_REQUEST_TIMEOUT_MS = 250_000;
+// 服务端命名单次调用预算 240 秒；名称生成在修复路径下是两次串行调用（最长约 480 秒），客户端超时必须覆盖该最坏情况。
+const NAMING_REQUEST_TIMEOUT_MS = 520_000;
 
 async function postNaming<T>(path: string, body: unknown, onProgress: (step: ProgressStep) => void, signal?: AbortSignal, onRetry?: () => void): Promise<T> {
   try {

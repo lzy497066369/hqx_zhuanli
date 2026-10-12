@@ -9,7 +9,10 @@ import type { StructureEvidenceSelection } from '../src/features/utility/structu
 
 export const NAMING_OPTIONS_PATH = '/api/utility/naming-options';
 export const NAMING_NAMES_PATH = '/api/utility/naming-names';
-const namingTimeoutMs = (config: AiConfig) => config.timeoutMs ?? 120000;
+// 命名总预算 240 秒：按模型数均分后每个模型 72 秒。之前 120 秒均分只有 36 秒，
+// 实测中转站上的主模型常要 40 到 80 秒才出结果，备用模型也会被 36 秒卡住，整次经常以 AI_TIMEOUT 收场。
+// 名称生成在修复路径下是两次串行调用（最长约 480 秒），前端 UtilityNaming.tsx 的等待上限必须长于这里。
+const namingTimeoutMs = (config: AiConfig) => config.timeoutMs ?? 240000;
 
 async function generateWithFallback(prompt: string, input: unknown, config: AiConfig, signal: AbortSignal, fetcher: typeof fetch, maxTokens: number, accept: (value: unknown) => boolean, onProgress?: ProgressReporter, stopOnInvalid = false) {
   const timeoutMs = namingTimeoutMs(config);

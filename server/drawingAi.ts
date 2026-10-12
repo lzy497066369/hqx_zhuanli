@@ -279,6 +279,9 @@ export function createAiMiddleware(config: AiConfig, fetcher: typeof fetch = fet
       if (path === STRUCTURE_ANSWERS_PATH || path === AI_PATH) send(res, 200, result); else finish(result);
     } catch (error) {
       const failure = error instanceof AiFailure ? error : new AiFailure(500, 'SERVER_ERROR', '生成服务暂时不可用，请稍后重试。');
+      // 每个失败的接口响应都留一行：以前容器日志里只有启动行，用户报错时无从回溯是哪个接口、什么错误码。
+      // 只记路径、状态码、错误码和耗时，不记请求内容。
+      console.warn('api failure', { path, status: failure.status, code: failure.code, elapsedMs: Date.now() - startedAt, aborted: controller.signal.aborted, ...(error instanceof AiFailure ? {} : { error: error instanceof Error ? `${error.name}: ${error.message}`.slice(0, 200) : String(error).slice(0, 200) }) });
       if (requestId) { recordStructureLog({ requestId, stage: 'request', httpStatus: failure.status, elapsedMs: Date.now() - startedAt, outcome: controller.signal.aborted ? 'aborted' : failure.code }); await flushStructureLog(); }
       const details = failure.details.length ? { details: failure.details } : {};
       if (streaming && res.headersSent) {

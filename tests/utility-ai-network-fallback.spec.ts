@@ -60,3 +60,37 @@ test('单次尝试超时按模型数均分，但封顶在 undici 300 秒无响�
   expect(attemptTimeoutMs(120_000, 0.9, 1)).toBe(108_000);
   expect(attemptTimeoutMs(600_000, 0.95, 0)).toBe(ATTEMPT_TIMEOUT_CAP_MS);
 });
+
+// 中转站对约 125 秒没有响应字节的连接会主动关闭；非流式请求在生成完成前零字节，长文必死。
+// 服务端改为流式请求，把 SSE 的 delta 拼回与非流式相同的 choice，上游忽略 stream 直接回 JSON 时也兼容。
+const sse = (events: unknown[]) => new Response([...events.map(event => `data: ${JSON.stringify(event)}`), 'data: [DONE]', ''].join('\n\n'), { headers: { 'Content-Type': 'text/event-stream' } });
+test('对模型发流式请求，并把 SSE 增量拼成完整 JSON 结果', async () => {
+  const config = makeConfig('sse');
+  for (const provider of aiProviders(config)) markProviderSucceeded(provider);
+  let requestBody: { stream?: unknown } = {};
+  const fetcher: typeof fetch = async (_url, init) => {
+    requestBody = JSON.parse(String(init?.body));
+    return sse([
+      { choices: [{ delta: { role: 'assistant' }, finish_reason: null }] },
+      { choices: [{ delta: { content: '{"title":"一种' }, finish_reason: null }] },
+      { choices: [{ delta: { content: '支架","parts":2}' }, finish_reason: null }] },
+      { choices: [{ delta: {}, finish_reason: 'stop' }] },
+      { choices: [] },
+    ]);
+  };
+  const result = await chatJson('prompt', { input: 1 }, config, new AbortController().signal, fetcher, 100);
+  expect(requestBody.stream).toBe(true);
+  expect(result.value).toEqual({ title: '一种支架', parts: 2 }); expect(result.model).toBe('primary-model');
+});
+test('流式返回里带 error 事件按上游失败处理并切换备用模型；非流式 JSON 仍按原样解析', async () => {
+  const config = makeConfig('sse-error');
+  for (const provider of aiProviders(config)) markProviderSucceeded(provider);
+  const models: string[] = [];
+  const fetcher: typeof fetch = async (_url, init) => {
+    const model = JSON.parse(String(init?.body)).model as string; models.push(model);
+    if (model === 'primary-model') return sse([{ error: { message: 'model overloaded' } }]);
+    return envelope({ ok: 'json' });
+  };
+  const result = await chatJson('prompt', {}, config, new AbortController().signal, fetcher, 100);
+  expect(models).toEqual(['primary-model', 'fallback-model']); expect(result.value).toEqual({ ok: 'json' });
+});

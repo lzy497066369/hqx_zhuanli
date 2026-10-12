@@ -798,6 +798,8 @@ test('集成：结构资料诊断仅记录脱敏模型、HTTP 状态和结束原
     expect(records).toEqual([
       ['structure-evidence completion', { model: 'gpt-6', httpStatus: 200, finishReason: 'unknown' }],
       ['structure-evidence completion', { model: 'gpt-6-sol', httpStatus: 200, finishReason: 'unknown' }],
+      // 接口失败统一落一行：只有路径、状态码、错误码、耗时，不含请求内容。
+      ['api failure', { path: STRUCTURE_EVIDENCE_PATH, status: 502, code: 'AI_INCOMPLETE', elapsedMs: expect.any(Number), aborted: false }],
     ]);
     expect(JSON.stringify(records)).not.toContain('private');
     expect(JSON.stringify(records)).not.toContain(config.apiKey);
