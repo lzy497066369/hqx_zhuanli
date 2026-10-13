@@ -6,7 +6,7 @@ import { GenerationProgress } from '../utility/generationProgress';
 import type { ProgressStep } from '../utility/generationProgress';
 import { progressRequest } from '../utility/progressRequest';
 import {
-  CAD_VIEWS, LOGIC_DIMENSIONS, PREVIEW_VIEWS, applyConflictChoices, createProductWorkflow, hasCurrentCad, hasCurrentConfirmation,
+  CAD_VIEWS, PREVIEW_VIEWS, applyConflictChoices, createProductWorkflow, hasCurrentCad, hasCurrentConfirmation,
   hasCurrentImageFigures, hasCurrentPreview, isPreviewConfirmation, isProductBrief, isProductCad, isProductImage, isProductMaterials,
   isProductPreview, isProductReview, isProductSelection, isProductWorkflowComplete, isRevisionDialogue, namingFingerprint, previewReference,
 } from './productWorkflow';
@@ -14,6 +14,7 @@ import type { ProductReview, ProductWorkflow, RevisionResponse } from './product
 import { PATENT_FIGURE_TEMPLATES } from './productPrompts';
 import { createProductWordBlob, previewImagesForVision, productImageBytes, productWordFilename } from './productWordExport';
 import './productWorkflow.css';
+import { workspaceHeaders } from '../../storage/workspaceContext';
 
 const PATH = '/api/product/';
 // CAD 阶段 = 视觉模型写脚本 + FreeCAD 建模 + 投影，比纯文本阶段更久，单独放宽客户端等待时间。
@@ -22,17 +23,19 @@ const CAD_WAIT_MS = 900000;
 const redrawDirections = [
   '保留结构，只优化外形', '用配色更清楚地区分部件', '重点结构表达更清晰', '四张视图布局更规整', '根据我的描述调整产品结构',
 ];
-type Task = { controller: AbortController; signal: AbortSignal };
+type Task = { controller: AbortController; signal: AbortSignal; generationToken?: string };
 
 export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
   project: Project; onSave: (projectId: string, workflow: ProductWorkflow) => void; onBack: () => void;
 }) {
+  const workspaceScope = useRef(workspaceHeaders()).current;
   const [workflow, setWorkflow] = useState<ProductWorkflow>(() => project.productWorkflow?.sourceFingerprint === namingFingerprint(project)
     ? project.productWorkflow : createProductWorkflow(project));
   const stateRef = useRef(workflow);
   const saveRef = useRef(onSave);
   saveRef.current = onSave;
   const taskRef = useRef<Task | null>(null);
+  const generationRef = useRef<{ token: string; timer: ReturnType<typeof setInterval> } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressStep[]>([]);
   const [error, setError] = useState('');
@@ -65,24 +68,54 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
     if (taskRef.current !== task) throw new DOMException('结果已经过期', 'AbortError');
   };
   const commit = (task: Task, changes: Partial<ProductWorkflow>) => { assertActive(task); return save(changes); };
+  const releaseGeneration = (expectedToken?: string) => {
+    const generation = generationRef.current;
+    if (!generation || (expectedToken && generation.token !== expectedToken)) return;
+    generationRef.current = null;
+    clearInterval(generation.timer);
+    void fetch('/api/generation/end', { method: 'POST', headers: { ...workspaceScope, 'Content-Type': 'application/json', 'X-Generation-Token': generation.token }, body: '{}', keepalive: true }).catch(() => {});
+  };
+  async function reserveGeneration(task: Task) {
+    if (generationRef.current) { task.generationToken = generationRef.current.token; return generationRef.current.token; }
+    // Queue waiting has no model timeout; explicit cancellation removes the waiter.
+    const response = await progressRequest<{ token: string }>('/api/generation/begin', {}, step => {
+      if (taskRef.current === task) setProgress(steps => [...steps.slice(-5), step]);
+    }, task.signal);
+    const token = response.data.token;
+    if (typeof token !== 'string' || !token) throw new Error('无法取得专利生成名额，请重试。');
+    try { assertActive(task); } catch (cause) {
+      void fetch('/api/generation/end', { method: 'POST', headers: { ...workspaceScope, 'Content-Type': 'application/json', 'X-Generation-Token': token }, body: '{}', keepalive: true }).catch(() => {});
+      throw cause;
+    }
+    task.generationToken = token;
+    const timer = setInterval(() => {
+      void fetch('/api/generation/heartbeat', { method: 'POST', headers: { ...workspaceScope, 'Content-Type': 'application/json', 'X-Generation-Token': token }, body: '{}' })
+        .then(response => { if (!response.ok && generationRef.current?.token === token) { taskRef.current?.controller.abort(); releaseGeneration(); setBusy(null); setError('本次生成名额已失效，请重新开始并排队。'); } })
+        .catch(() => {});
+    }, 30000);
+    generationRef.current = { token, timer };
+    return token;
+  }
   async function call<T>(stage: string, body: unknown, task: Task, waitMs = TEXT_WAIT_MS): Promise<T> {
     assertActive(task);
+    const token = await reserveGeneration(task);
     // 客户端等待必须长于服务端总预算（server/productWorkflowAi.ts 文本 600 秒、CAD 阶段另计），
     // 否则服务端还在生成时浏览器先中断，用户看不到服务端返回的具体原因。
     const response = await progressRequest<T>(PATH + stage, body, step => {
       if (taskRef.current === task && !task.signal.aborted) setProgress(steps => [...steps.slice(-5), step]);
-    }, AbortSignal.any([task.signal, AbortSignal.timeout(waitMs)]));
+    }, AbortSignal.any([task.signal, AbortSignal.timeout(waitMs)]), { 'X-Generation-Token': token });
     assertActive(task);
     return response.data;
   }
   const run = async (label: string, operation: (task: Task) => Promise<void>) => {
     if (taskRef.current) return;
     const controller = new AbortController();
-    const task = { controller, signal: controller.signal };
+    const task: Task = { controller, signal: controller.signal };
     taskRef.current = task;
     setBusy(label); setError(''); setNotice(''); setProgress([{ label, detail: '正在连接服务，请稍候' }]);
     try { await operation(task); }
     catch (cause) {
+      if (task.generationToken) releaseGeneration(task.generationToken);
       if (!task.signal.aborted && taskRef.current === task) {
         // 服务端附带的具体原因（如模型输出未通过校验的条目）一并展示，便于判断是重试还是改选择。
         const details = (cause as { details?: unknown })?.details;
@@ -95,6 +128,7 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
   };
   const cancel = () => {
     taskRef.current?.controller.abort(); taskRef.current = null; setBusy(null);
+    releaseGeneration();
     setNotice('已停止等待本次生成，已有结果仍保留。生图服务或 FreeCAD 可能已开始处理，系统不会自动重复提交。');
   };
   async function finishPreview(task: Task, review: ProductReview) {
@@ -156,6 +190,7 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
     setNotice(hasCurrentCad(stateRef.current)
       ? 'FreeCAD 统一模型、专利附图与申请文案已生成，可以下载包含实际附图和建模记录的 Word 文档。'
       : 'AI 黑白结构图与申请文案已生成（未使用 FreeCAD），可以下载 Word 文档。');
+    if (task.generationToken) releaseGeneration(task.generationToken);
   }
   const confirmPreview = () => void run('确认预览并生成成品', async task => {
     const current = stateRef.current;
@@ -229,20 +264,20 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
         void run('检查产品逻辑', task => reviewAndPreview(task, { selection: stateRef.current.selection }));
       }
     }, 0);
-    return () => { clearTimeout(timer); taskRef.current?.controller.abort(); taskRef.current = null; };
+    const onPageHide = () => { taskRef.current?.controller.abort(); releaseGeneration(); };
+    window.addEventListener('pagehide', onPageHide);
+    return () => { clearTimeout(timer); window.removeEventListener('pagehide', onPageHide); taskRef.current?.controller.abort(); taskRef.current = null; releaseGeneration(); };
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- A keyed workspace owns exactly one project and resumes only on explicit retry after a failure.
   }, [project.id]);
 
   return <div className="product-workflow" data-testid="product-workflow">
     <button className="un-back" onClick={onBack}><ArrowLeft size={16} />返回修改名称与特征</button>
     <header className="pw-heading"><div><div className="un-eyebrow">PRODUCT STUDIO · {workflow.selection.patentType === 'invention' ? '发明专利' : '实用新型'}</div>
-      <h1>{title}</h1><p>先消除逻辑矛盾，再看四张彩色预览；满意后由 FreeCAD 统一建模，再生成文档与专利附图。</p></div>
-      <span className="pw-badge"><ShieldCheck size={16} />同一简介 · 同一版本</span></header>
+      <h1>{title}</h1></div></header>
     <ol className="pw-steps" aria-label="产品生成流程">{['逻辑校验与去矛盾', '详细产品简介', '四张彩色预览与重画', '确认并生成成品'].map((label, index) =>
       <li key={label} className={index < activeStep || complete ? 'done' : index === activeStep ? 'active' : ''} aria-current={index === activeStep ? 'step' : undefined}>
         <span>{index < activeStep || complete ? <Check size={16} /> : `0${index + 1}`}</span><strong>{label}</strong></li>)}</ol>
-    <p className="pw-boundary">AI 检查用于识别方案中的逻辑矛盾，不等于工程、安全或专利性认证。FreeCAD 模型由视觉模型按预览自动编写脚本生成，尺寸为推定值；最终材料仍需发明人和专业人员核实。</p>
-    {busy && <div className="pw-progress"><GenerationProgress title={busy} label="产品生成" steps={progress} note="四个视角各自只提交一次生图请求；FreeCAD 建模脚本在隔离目录中执行，失败不会自动重复提交。" /><button className="button secondary" onClick={cancel}><X size={15} />停止等待</button></div>}
+    {busy && <div className="pw-progress"><GenerationProgress title={busy} label="产品生成" steps={progress} /><button className="button secondary" onClick={cancel}><X size={15} />停止等待</button></div>}
     {error && <div className="pw-error" role="alert"><CircleAlert size={18} /><div><p>{error}</p>{!busy && workflow.review && <button className="pw-restore" onClick={restartFromReview}>从逻辑校验重新生成</button>}</div></div>}
     {notice && <p className="pw-notice" role="status">{notice}</p>}
     {!isProductSelection(workflow.selection) && <p className="pw-error" role="alert">当前项目缺少已选产品特征，请返回名称与特征页面补充后继续。</p>}
@@ -294,9 +329,6 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
         <p className="pw-muted">Word 嵌入实际黑白图片，不依赖临时图片网址；FreeCAD 附图为真实投影线稿，不是生成图片。</p>
       </section>
     </div><aside className="pw-side">
-      <section className="pw-panel"><h2><ShieldCheck size={18} />逻辑检查</h2>{workflow.review ? <><p className={conflictReview ? '' : 'pw-pass'}>{conflictReview ? '存在需要处理的矛盾' : '基于当前信息未发现逻辑矛盾'}</p><p>{workflow.review.summary}</p><ul className="pw-checks">{workflow.review.checks.map(check => <li key={check.dimension} className={check.status}><strong>{LOGIC_DIMENSIONS[check.dimension]}</strong><span>{check.explanation}</span></li>)}</ul>
-        {!!workflow.review.assumptions.length && <details className="pw-details"><summary>合理推定与核实事项</summary><ul>{workflow.review.assumptions.map(item => <li key={item}>{item}</li>)}</ul></details>}</> : <p className="pw-muted">用户所有选择会连同初步名称一起交给大模型，进行独立的交叉检查。</p>}</section>
-      <section className="pw-panel"><h2><FileText size={18} />详细产品简介</h2>{workflow.brief ? <><p>{workflow.brief.design.overview}</p><details className="pw-details"><summary>展开完整产品简介</summary><pre>{workflow.brief.description}</pre></details></> : <p className="pw-muted">逻辑检查通过后自动生成，作为全部图片、CAD 模型与文案的共同依据。</p>}</section>
       <section className="pw-panel"><h2>当前生效选择</h2><p className="pw-muted">{workflow.selection.company} · {workflow.selection.product}</p><ul className="pw-choices">{workflow.selection.choices.map(choice => <li key={choice.id}>{choice.text}</li>)}</ul>{workflow.selection.visualPreferences && <p className="pw-prose">绘图要求：{workflow.selection.visualPreferences}</p>}</section>
     </aside></div>
     {redrawOpen && <Modal title="告诉我们这次想怎么改" wide onClose={() => { if (busy) cancel(); setRedrawOpen(false); }}>

@@ -1,0 +1,58 @@
+-- MySQL 8.0+, utf8mb4. Applied automatically under a database advisory lock.
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version INT UNSIGNED PRIMARY KEY,
+  name VARCHAR(128) NOT NULL,
+  applied_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS workspaces (
+  id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+  projects_revision INT UNSIGNED NOT NULL DEFAULT 0,
+  materials_revision INT UNSIGNED NOT NULL DEFAULT 0,
+  projects_initialized BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS projects (
+  workspace_id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  name VARCHAR(500) NOT NULL,
+  category ENUM('invention','utility','design','software') NOT NULL,
+  owner VARCHAR(500) NOT NULL,
+  description MEDIUMTEXT NOT NULL,
+  status ENUM('draft','ready') NOT NULL,
+  is_demo BOOLEAN NOT NULL DEFAULT FALSE,
+  position INT UNSIGNED NOT NULL,
+  data JSON NOT NULL,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (workspace_id, id),
+  INDEX idx_projects_filter (workspace_id, category, status),
+  CONSTRAINT fk_projects_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS naming_drafts (
+  workspace_id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  draft_key VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  data JSON NOT NULL,
+  revision INT UNSIGNED NOT NULL DEFAULT 1,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (workspace_id, draft_key),
+  CONSTRAINT fk_drafts_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS materials (
+  workspace_id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  name VARCHAR(1024) NOT NULL,
+  size BIGINT UNSIGNED NOT NULL,
+  mime_type VARCHAR(255) NOT NULL DEFAULT '',
+  last_modified BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  position INT UNSIGNED NOT NULL,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (workspace_id, id),
+  CONSTRAINT fk_materials_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

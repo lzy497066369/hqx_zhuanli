@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 import {
   ArrowDownToLine,
   ArrowRight,
@@ -8,9 +8,7 @@ import {
   Box,
   Check,
   CheckCheck,
-  ChevronDown,
   ChevronRight,
-  CircleHelp,
   Clock3,
   Code2,
   FileCheck2,
@@ -38,6 +36,9 @@ import {
 } from "./data";
 import type { CategoryId, Project } from "./data";
 import { deleteNamingDraft, loadProjectsAsync, saveProjectsAsync } from "./storage/projectStorage";
+import { loadMaterialsAsync, saveMaterialsAsync } from './storage/materialStorage';
+import type { Material } from './storage/materialStorage';
+import { getStorageDriver, storageError } from './storage/storageApi';
 import { newId } from "./storage/id";
 import { Illustration } from "./components/Illustration";
 import { UtilityNaming } from "./features/utility/UtilityNaming";
@@ -52,9 +53,10 @@ import type { NamingRecord } from "./features/utility/naming";
 import { utilityDraftKey } from "./features/utility/naming";
 import { Modal } from "./components/Modal";
 import "./App.css";
+import { authRequest } from './features/auth/authApi';
+import type { AuthUser } from './features/auth/authApi';
 
 type Page = "dashboard" | "projects" | "materials" | "templates" | "utility" | "invention";
-type Material = { id: string; name: string; size: number };
 const pages: Record<Page, string> = {
   dashboard: "工作台",
   projects: "项目管理",
@@ -73,14 +75,15 @@ function getPage(): Page {
   const value = location.hash.slice(1).split("/")[0];
   return Object.hasOwn(pages, value) ? (value as Page) : "dashboard";
 }
-function App() {
+function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser | null; workspaceManager?: ReactNode; workspaceName?: string }) {
   const [page, setPage] = useState<Page>(getPage);
   const [projects, setProjects] = useState<Project[]>([]);
   const [storageReady, setStorageReady] = useState(false);
+  const [storageIssue, setStorageIssue] = useState('');
+  const [storageMode, setStorageMode] = useState<'mysql' | 'indexeddb'>('mysql');
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [mobileNav, setMobileNav] = useState(false);
-  const [help, setHelp] = useState(false);
   const [notifications, setNotifications] = useState(false);
   const [profile, setProfile] = useState(false);
   const [toast, setToast] = useState("");
@@ -98,12 +101,14 @@ function App() {
   const [saving, setSaving] = useState(false);
   const upload = useRef<HTMLInputElement>(null);
   const mainRef = useRef<HTMLElement>(null);
-  // IndexedDB 异步加载：完成前不渲染，避免旧数据闪烁；完成前禁止写入，避免空数组覆盖数据库。
+  // Load storage before enabling writes; a connection failure cannot overwrite data.
   useEffect(() => {
     let cancelled = false;
-    loadProjectsAsync().then(list => {
+    Promise.all([loadProjectsAsync(), loadMaterialsAsync(), getStorageDriver()]).then(([list, files, mode]) => {
       if (cancelled) return;
       setProjects(list);
+      setMaterials(files);
+      setStorageMode(mode);
       const hashId = location.hash.split("/")[1];
       // oxlint-disable-next-line react/set-state-in-effect -- Hydrate navigation state once storage is ready.
       setUtilityProject(list.find(p => p.category === "utility" && p.id === hashId));
@@ -114,6 +119,8 @@ function App() {
       }
       // oxlint-disable-next-line react/set-state-in-effect -- Hydrate navigation state once storage is ready.
       setStorageReady(true);
+    }).catch(error => {
+      if (!cancelled) setStorageIssue(error instanceof Error ? error.message : '项目加载失败，请检查存储服务。');
     });
     return () => { cancelled = true; };
   }, []);
@@ -147,10 +154,18 @@ function App() {
     let cancelled = false;
     saveProjectsAsync(projects).then(ok => {
       // oxlint-disable-next-line react/set-state-in-effect -- Report failed external storage writes.
-      if (!cancelled && !ok) setToast("浏览器存储不可用，本次修改仅在当前页面保留。");
+      if (!cancelled && !ok) setStorageIssue(storageError());
     });
     return () => { cancelled = true; };
   }, [projects, storageReady]);
+  useEffect(() => {
+    if (!storageReady) return;
+    let cancelled = false;
+    saveMaterialsAsync(materials).then(ok => {
+      if (!cancelled && !ok) setStorageIssue(storageError());
+    });
+    return () => { cancelled = true; };
+  }, [materials, storageReady]);
   useEffect(() => {
     if (toast) {
       const timer = setTimeout(() => setToast(""), 4200);
@@ -201,7 +216,7 @@ function App() {
     updated.productWorkflow = inventionProject.productWorkflow?.sourceFingerprint === namingFingerprint(updated) ? inventionProject.productWorkflow : createProductWorkflow(updated);
     setProjects(list => list.map(item => item.id === updated.id ? updated : item));
     setInventionStage("workspace");
-    setToast("名称已保存，进入逻辑校验、彩色预览和申请材料流程");
+    setToast("名称已确认，正在保存并进入产品创作流程");
   };
   const saveUtilityName = (naming: NamingRecord) => {
     const id = utilityProject?.id || newId();
@@ -229,7 +244,7 @@ function App() {
     location.hash = `utility/${project.id}`;
     try { localStorage.removeItem(utilityDraftKey()); } catch { /* The form reports storage errors. */ }
     void deleteNamingDraft();
-    setToast("名称已保存，开始独立检查产品逻辑，再生成详细简介和彩色预览");
+    setToast("名称已确认，正在保存并检查产品逻辑");
   };
   const openUtilityWorkspace = () => {
     if (!utilityProject) return;
@@ -286,7 +301,7 @@ function App() {
       location.hash = `invention/${project.id}`;
       setToast("项目已保存，请先核对技术事实并生成申请材料");
     } else {
-      setToast("项目草稿已保存到此浏览器");
+      setToast("项目草稿已更新，正在保存");
       setPreview(project);
     }
   };
@@ -481,7 +496,8 @@ function App() {
     return (
       <div className="app-shell">
         <div className="empty-state">
-          <h2>正在加载本地项目…</h2>
+          <h2>{storageIssue ? '项目加载失败' : '正在加载项目…'}</h2>
+          {storageIssue && <><p role="alert">{storageIssue}</p><button className="button primary" onClick={() => location.reload()}>重新加载</button></>}
         </div>
       </div>
     );
@@ -514,13 +530,7 @@ function App() {
             知创工坊<small>IDEAS INTO ASSETS</small>
           </span>
         </a>
-        <div className="workspace-label">
-          <span className="workspace-avatar">知</span>
-          <span>
-            我的创作空间<small>个人工作空间</small>
-          </span>
-          <ChevronDown size={15} />
-        </div>
+        {workspaceManager}
         <div className="nav-label">工作空间</div>
         <nav aria-label="主要导航">
           {navItems.map(({ id, icon: Icon }) => (
@@ -549,30 +559,8 @@ function App() {
             <span>模板中心</span>
             <span className="small-new">NEW</span>
           </a>
-          <button className="nav-item" onClick={() => setHelp(true)}>
-            <CircleHelp size={19} />
-            <span>使用指南</span>
-            <span className="external-arrow">↗</span>
-          </button>
         </nav>
         <div className="sidebar-bottom">
-          <div className="local-card">
-            <span className="local-icon">
-              <ShieldCheck size={20} />
-            </span>
-            <strong>创意，由你掌握</strong>
-            <p>
-              当前为前端体验版
-              <br />
-              项目草稿保存在此浏览器
-            </p>
-            <button onClick={() => setHelp(true)}>
-              了解工作流程 <ArrowUpRight />
-            </button>
-          </div>
-          <button className="sidebar-help" onClick={() => setHelp(true)}>
-            <CircleHelp size={17} /> 帮助与反馈 <ChevronRight size={15} />
-          </button>
           <div className="sidebar-version">
             <span className="online-dot" />
             本地工作空间 <span>v1.0</span>
@@ -589,7 +577,7 @@ function App() {
             >
               <Menu size={21} />
             </button>
-            <span>工作空间</span>
+            <span>{workspaceName || '工作空间'}</span>
             <ChevronRight size={14} />
             <strong>{page === "utility" && utilityStage === "workspace" ? "实用新型 · 产品预览与成品" : pages[page]}</strong>
           </div>
@@ -642,14 +630,20 @@ function App() {
                   setNotifications(false);
                 }}
               >
-                知
+                {user?.displayName.slice(0, 1) || '知'}
               </button>
               {profile && (
                 <div className="popover">
-                  <strong>个人工作空间</strong>
+                  <strong>{user?.displayName || '个人工作空间'}</strong>
+                  {user && <p>@{user.username} · 普通用户</p>}
                   <p>
-                    当前使用访客模式，未连接账户服务。项目仅保存在当前浏览器，请及时导出重要材料。
+                    {storageMode === 'mysql' ? '每个工作空间只属于你的账号，项目、草稿和资料按空间独立保存。' : '当前使用浏览器存储，请及时导出重要材料。'}
                   </p>
+                  {user && <button className="account-logout" onClick={async () => {
+                    if (!window.confirm('确认退出登录？请先确认当前修改已保存。')) return;
+                    try { await authRequest('logout', {}); location.reload(); }
+                    catch (error) { setToast(error instanceof Error ? error.message : '退出失败，请重试。'); }
+                  }}>退出登录</button>}
                 </div>
               )}
             </div>
@@ -750,10 +744,6 @@ function App() {
                     </h2>
                     <p>选择知识产权类型，将你的灵感转化为专业材料。</p>
                   </div>
-                  <button className="text-button" onClick={() => setHelp(true)}>
-                    <CircleHelp size={15} />
-                    如何选择？
-                  </button>
                 </div>
                 <div className="category-grid">
                   {categories.map((c, i) => (
@@ -801,51 +791,6 @@ function App() {
                   </div>
                   {projectTable}
                 </section>
-                <section className="guide-card">
-                  <div className="guide-heading">
-                    <span>
-                      <Sparkles size={17} />
-                      创作小指南
-                    </span>
-                    <span className="guide-mini" aria-hidden="true">
-                      QUICK START
-                    </span>
-                  </div>
-                  <h3>从想法到材料，只需三步</h3>
-                  <ol>
-                    <li>
-                      <span>1</span>
-                      <div>
-                        <strong>选择创作类型</strong>
-                        <p>找到适合你的知识产权方向</p>
-                      </div>
-                    </li>
-                    <li>
-                      <span>2</span>
-                      <div>
-                        <strong>描述你的创意</strong>
-                        <p>填写项目信息，梳理创新要点</p>
-                      </div>
-                    </li>
-                    <li>
-                      <span>3</span>
-                      <div>
-                        <strong>完善并导出材料</strong>
-                        <p>按模板补充内容，交由专业人员审核</p>
-                      </div>
-                    </li>
-                  </ol>
-                  <button onClick={() => setHelp(true)}>
-                    查看完整使用指南
-                    <ArrowRight size={15} />
-                  </button>
-                </section>
-              </div>
-              <div className="bottom-note">
-                <ShieldCheck size={15} />
-                <span>专注创作，安心记录</span>
-                <i />
-                当前为前端预览，示例数据仅用于展示
               </div>
             </>
           ) : (
@@ -919,10 +864,6 @@ function App() {
               )}
               {page === "templates" && (
                 <>
-                  <div className="info-banner">
-                    <CircleHelp size={18} />
-                    模板用于信息整理，不包含真实 AI 生成内容，也不替代专业审核。
-                  </div>
                   <div className="template-grid">
                     {categories.map((c) => {
                       const Icon = categoryIcons[c.id];
@@ -975,18 +916,20 @@ function App() {
                           id: newId(),
                           name: file.name,
                           size: file.size,
+                          mimeType: file.type,
+                          lastModified: file.lastModified,
                         })),
                       ]);
                       if (files.length)
                         setToast(
-                          `已添加 ${files.length} 个文件的本地信息，未上传文件内容`,
+                          `已添加 ${files.length} 个文件的信息，正在保存；未上传文件内容`,
                         );
                       e.target.value = "";
                     }}
                   />
                   <div className="info-banner">
                     <ShieldCheck size={18} />
-                    本页面仅展示所选文件的名称和大小，不上传内容；刷新页面后将清空。
+                    文件名称、大小等信息会保存，刷新后可恢复；文件内容不会上传。
                   </div>
                   {materials.length ? (
                     <div className="materials-list">
@@ -995,7 +938,7 @@ function App() {
                           <FileText size={24} />
                           <div>
                             <strong>{m.name}</strong>
-                            <p>{(m.size / 1024).toFixed(1)} KB · 仅本次会话</p>
+                            <p>{(m.size / 1024).toFixed(1)} KB · 文件信息</p>
                           </div>
                           <button
                             className="icon-button"
@@ -1037,10 +980,6 @@ function App() {
           <footer>
             <span>© {new Date().getFullYear()} 知创工坊</span>
             <span>让创新更简单，让价值被看见。</span>
-            <button onClick={() => setHelp(true)}>
-              关于工作空间
-              <ArrowUpRight />
-            </button>
           </footer>
         </main>
       </div>
@@ -1137,7 +1076,7 @@ function App() {
             />
             <p className="field-help">
               <ShieldCheck size={14} />
-              草稿仅保存在当前浏览器，不会上传至服务器。
+              {storageMode === 'mysql' ? '草稿会自动保存到服务器的 MySQL 数据库。' : '草稿保存在当前浏览器。'}
             </p>
             <div className="form-footer">
               <span>先记录，再慢慢完善</span>
@@ -1167,10 +1106,6 @@ function App() {
               <Clock3 size={14} />
               更新于 {new Date(preview.updatedAt).toLocaleString("zh-CN")}
             </p>
-          </div>
-          <div className="info-banner">
-            <CircleHelp size={17} />
-            {preview.productWorkflow ? 'AI 生成的材料初稿需专业核实，不代表专利授权或工程认证。' : '以下为待完善的材料模板，不是正式申请文件。'}
           </div>
           {preview.productWorkflow
             ? isProductWorkflowComplete(preview.productWorkflow) && preview.productWorkflow.sourceFingerprint === namingFingerprint(preview)
@@ -1266,7 +1201,7 @@ function App() {
       {deleting && (
         <Modal title="删除这个项目？" onClose={() => setDeleting(null)}>
           <p className="delete-message">
-            “{deleting.name}”将从当前浏览器移除，此操作无法撤销。
+            “{deleting.name}”将从工作空间移除，此操作无法撤销。
           </p>
           <div className="confirm-actions">
             <button
@@ -1281,7 +1216,7 @@ function App() {
                 setProjects((list) => list.filter((p) => p.id !== deleting.id));
                 setDeleting(null);
                 setPreview(null);
-                setToast("项目已删除");
+                setToast("项目已移除，正在保存");
               }}
             >
               确认删除
@@ -1289,49 +1224,11 @@ function App() {
           </div>
         </Modal>
       )}
-      {help && (
-        <Modal title="让好想法，从这里开始" onClose={() => setHelp(false)} wide>
-          <p className="form-intro">知创工坊 · 前端体验指南</p>
-          <div className="help-grid">
-            {categories.map((c) => {
-              const Icon = categoryIcons[c.id];
-              return (
-                <div key={c.id}>
-                  <span className={`file-icon ${c.color}`}>
-                    <Icon size={21} />
-                  </span>
-                  <h3>{c.name}</h3>
-                  <p>{c.hint}。</p>
-                </div>
-              );
-            })}
-          </div>
-          <div className="help-steps">
-            <h3>你的创作路径</h3>
-            <p>
-              ① 选择类型 → ② 填写项目信息 → ③ 保存草稿 → ④ 导出模板并补充材料
-            </p>
-          </div>
-          <div className="info-banner">
-            <ShieldCheck size={19} />
-            <span>
-              这是纯前端原型，尚未接入
-              AI、账号或申报服务。示例项目不是实际业务记录；草稿仅存于此浏览器，清理网站数据会使其丢失。正式材料请交由专业人员审核。
-            </span>
-          </div>
-          <button
-            className="button primary"
-            onClick={() => {
-              setHelp(false);
-              create();
-            }}
-          >
-            创建我的第一个项目
-            <ArrowRight size={16} />
-          </button>
-        </Modal>
-      )}
       <div className="toast-container" aria-live="polite" role="status">
+        {storageIssue && <div className="toast" role="alert"><span>{storageIssue} 当前修改仍保留在页面，请先备份。</span><button className="button secondary" onClick={() => {
+          const url = URL.createObjectURL(new Blob([JSON.stringify({ projects, materials }, null, 2)], { type: 'application/json' }));
+          const anchor = document.createElement('a'); anchor.href = url; anchor.download = '知创工坊-未保存数据.json'; anchor.click(); URL.revokeObjectURL(url);
+        }}>导出备份</button></div>}
         {toast && (
           <div className="toast">
             <Check size={18} />
@@ -1348,8 +1245,5 @@ function App() {
       </div>
     </div>
   );
-}
-function ArrowUpRight() {
-  return <ArrowRight size={14} className="arrow-up" />;
 }
 export default App;

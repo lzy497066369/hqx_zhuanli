@@ -4,8 +4,8 @@ playwright-report
 test-results
 artifacts
 .git
-.env.local
 .env
+.env.*
 *.zip
 *.rar
 tmp-diag-*.ts

@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "test:auth": "node --experimental-strip-types --env-file-if-exists=.env.local --test tests/auth-api.test.mjs tests/workspace-isolation.test.mjs && playwright test --config playwright.auth.config.ts",
+    "db:migrate": "node --experimental-strip-types --env-file-if-exists=.env.local server/mysql/migrate.ts",
+    "test:mysql": "node --experimental-strip-types --env-file-if-exists=.env.local --test tests/mysql-storage.test.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
@@ -18,6 +21,7 @@
   "dependencies": {
     "docx": "^9.7.1",
     "lucide-react": "^1.47.0",
+    "mysql2": "^3.24.5",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

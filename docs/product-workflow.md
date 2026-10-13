@@ -22,6 +22,8 @@
 
 ## 代码入口
 
+Word 元数据只写入实际文档标题和本次导出时的创建、修改时间，不再写入固定品牌作者或生成过程描述。未采集的作者、最后修改人、修订次数、累计编辑时长不填，也不采用 Word 库的 `Un-named` 和默认修订号。再次用 Word 编辑保存后，属性由 Word 按实际操作更新；此调整不修改已有文件。
+
 - `src/features/product/ProductWorkflowWorkspace.tsx`：页面、去矛盾、重画澄清、四图预览确认、CAD/兜底成品、分阶段恢复。
 - `src/features/product/productWorkflow.ts`：类型、数据校验、版本门禁、原始选择快照、持久化校验（`previews`、`cad` 与旧版 `preview` 兼容）。
 - `src/features/product/productPrompts.ts`：四个彩色视角模板、黑白模板、附图登记表（`FIGURE_CATALOG`）与 CAD 视角定义。

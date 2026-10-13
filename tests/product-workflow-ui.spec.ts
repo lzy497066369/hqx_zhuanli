@@ -15,11 +15,17 @@ async function seed(page: Page, workflow: ProductWorkflow = createProductWorkflo
 async function mockFlow(page: Page, options: { conflict?: boolean; briefProofFailures?: number; previewFailures?: number; materialFailures?: number; cadFailures?: number; clarificationRounds?: number; holdPreview?: Promise<void> } = {}) {
   const counts: Record<string, number> = {};
   const inputs: { stage: string; body: Record<string, unknown> }[] = [];
-  await page.route('**/api/**', route => route.abort());
+  await page.route('**/api/**', route => /^\/api\/(storage|auth)\//.test(new URL(route.request().url()).pathname) ? route.continue() : route.abort());
+  await page.route('**/api/generation/**', route => {
+    const stage = new URL(route.request().url()).pathname.split('/').at(-1)!;
+    counts[`generation-${stage}`] = (counts[`generation-${stage}`] || 0) + 1;
+    return route.fulfill({ json: stage === 'begin' ? { token: 'test-generation-token' } : { success: true } });
+  });
   await page.route('**/api/product/**', async route => {
     const stage = new URL(route.request().url()).pathname.split('/').at(-1)!;
     counts[stage] = (counts[stage] || 0) + 1;
     const body = route.request().postDataJSON(); inputs.push({ stage, body });
+    expect(route.request().headers()['x-generation-token']).toBe('test-generation-token');
     let result: unknown;
     if (stage === 'review') {
       const selection: ProductSelection = body.review ? applyConflictChoices(body.review, body.resolutions) : body.selection;
@@ -70,6 +76,8 @@ test('完整链路：校验后自动生成简介和四张预览，明确确认�
   expect(mock.counts).toMatchObject({ review: 1, brief: 1, preview: 1 }); expect(mock.counts.materials || 0).toBe(0); expect(mock.counts.cad || 0).toBe(0); expect(mock.counts.figure || 0).toBe(0);
   await confirmButton(page).click(); await expect(exportButton(page)).toBeEnabled();
   expect(mock.counts).toMatchObject({ confirm: 1, cad: 1, materials: 1 }); expect(mock.counts.figure || 0).toBe(0);
+  expect(mock.counts['generation-begin']).toBe(1);
+  await expect.poll(() => mock.counts['generation-end']).toBe(1);
   const materialInput = mock.inputs.find(input => input.stage === 'materials')!.body;
   const cadInput = mock.inputs.find(input => input.stage === 'cad')!.body;
   expect(materialInput.brief).toEqual(cadInput.brief);
@@ -240,6 +248,15 @@ test('非安全上下文（局域网 http）下没有 crypto.randomUUID，确认
   for (const label of ['壳体与支架', '固定连接', '部件相对固定', '平板与方壳']) await page.getByRole('checkbox', { name: new RegExp(label) }).check();
   await page.getByRole('button', { name: '确认所选结构资料' }).click(); await page.getByRole('button', { name: '确认选项并生成名称' }).click();
   await page.locator('.un-candidate').first().click();
+  const nameInput = page.locator('.un-results').getByRole('textbox', { name: '实用新型名称', exact: true });
+  const saveName = page.locator('.un-results').getByRole('button', { name: '确认名称并检查产品逻辑' });
+  await expect(page.locator('.un-confirm')).toHaveCount(0);
+  await expect(nameInput).toBeVisible();
+  const chosenName = await nameInput.inputValue();
+  await nameInput.fill('');
+  await expect(saveName).toBeDisabled();
+  await nameInput.fill(chosenName);
+  await expect(saveName).toBeEnabled();
   await page.getByRole('button', { name: '确认名称并检查产品逻辑' }).click();
   await expect(page.getByTestId('product-workflow')).toBeVisible(); expect(page.url()).toMatch(/#utility\/[0-9a-f-]{36}$/);
   await expect(confirmButton(page)).toBeEnabled();

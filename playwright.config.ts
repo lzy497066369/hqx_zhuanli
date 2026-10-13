@@ -4,6 +4,9 @@ export default defineConfig({
   // These suites require the separate offline configs and an external artifact
   // directory with the network guard installed; they cannot run in the UI suite.
   testIgnore: [
+    '**/mysql-workspace.spec.ts',
+    '**/auth-workspace.spec.ts',
+    '**/private-workspaces.spec.ts',
     "**/utility-phase17-evidence.spec.ts",
     "**/utility-responses-stage-boundary.spec.ts",
     "**/phase16f-query-coverage.spec.ts",
@@ -26,6 +29,8 @@ export default defineConfig({
     },
   ],
   webServer: {
+    // Legacy browser-storage regression suite; real MySQL uses its isolated suite.
+    env: { STORAGE_DRIVER: 'indexeddb', AUTH_REQUIRED: 'false' },
     command: "npm run dev -- --host 127.0.0.1",
     url: "http://127.0.0.1:5173",
     reuseExistingServer: !process.env.CI,

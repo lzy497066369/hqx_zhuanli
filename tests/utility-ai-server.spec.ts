@@ -154,16 +154,11 @@ test('AI 安全：同源本机限制、方法/类型/大小校验、不配置时
   }, stub(() => envelope()), { ...config, apiKey: '' });
 });
 
-test('AI 安全：一分钟内请求限额，防止误点反复消耗额度', async () => {
+test('AI 队列：连续正常请求不会被原先每分钟 8 次的全局限额误拦截', async () => {
   let calls = 0;
   await withApi(async base => {
-    // 每分钟上限为 8 次（server/drawingAi.ts 的 starts.length >= 8），前 8 次放行，
-    // 第 9 次才触发 429。
-    for (let i = 0; i < 8; i++) expect((await post(base)).status).toBe(200);
-    const response = await post(base);
-    expect(response.status).toBe(429);
-    expect((await response.json()).error.code).toBe('LOCAL_RATE_LIMIT');
-    expect(calls).toBe(8);
+    for (let i = 0; i < 12; i++) expect((await post(base)).status).toBe(200);
+    expect(calls).toBe(12);
   }, stub(() => { calls++; return envelope(); }));
 });
 

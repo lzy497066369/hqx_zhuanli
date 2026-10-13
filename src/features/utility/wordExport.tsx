@@ -7,7 +7,7 @@ import { UtilityFigure } from "./UtilityFigure";
 import { buildContentAssembly } from "./contentDrawing";
 import { FIGURE_DESCRIPTIONS, FIGURE_LABELS, PATENT_DRAWING_STYLE, SVG_FRAME } from "./drawingModel";
 import type { Figure } from "./drawingModel";
-import { fitWordImage, packPatentWord, patentSection, WORD_BODY as BODY, WORD_BODY_PARAGRAPH as BODY_PARAGRAPH, WORD_STYLES, wordCaption, wordHeading, wordImageParagraph, wordTitle } from "./wordFormat";
+import { fitWordImage, packPatentWord, patentSection, WORD_BODY as BODY, WORD_BODY_PARAGRAPH as BODY_PARAGRAPH, WORD_METADATA, WORD_STYLES, wordCaption, wordHeading, wordImageParagraph, wordTitle } from "./wordFormat";
 import { freezePatentPackage } from './patentPackage';
 
 function body(text: string) {
@@ -64,6 +64,7 @@ export async function createUtilityWordBlob(project: Project, drawing: UtilityDr
   }
   if (!abstractFigure) throw new Error('缺少摘要附图，无法导出 Word。');
   const document = new Document({
+    ...WORD_METADATA,
     title: final.title,
     styles: WORD_STYLES,
     features: { updateFields: true },

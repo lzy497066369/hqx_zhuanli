@@ -16,12 +16,14 @@ import type { UtilityMaterials } from '../src/data.ts';
 import { sanitizeFinalPatentDocument } from '../src/features/utility/finalDocumentSanitizer.ts';
 import { validatePatentDocument } from '../src/features/utility/patentValidator.ts';
 import { assertGenerationProof } from '../src/features/utility/patentPackage.ts';
+import { defaultGenerationQueue } from './generationQueue.ts';
 
 export const MATERIALS_V2_PATH = '/api/utility/materials-v2';
 export const MATERIALS_V2_STATUS_PATH = '/api/utility/materials-v2/status';
 
 // 存储生成任务的状态
 const generationTasks = new Map<string, {
+  owner: string;
   status: 'running' | 'completed' | 'failed';
   progress: number;
   message: string;
@@ -203,48 +205,55 @@ export async function handleMaterialsV2Request(
   body: any,
   config: AiConfig,
   signal?: AbortSignal,
-  progress?: (update: { progress: number; message: string }) => void
+  progress?: (update: { progress: number; message: string }) => void,
+  schedule: (operation: (signal: AbortSignal) => Promise<void>, onQueued: (position: number) => void) => Promise<void> = async (operation, onQueued) => {
+    const controller = new AbortController();
+    const release = await defaultGenerationQueue.acquire(controller.signal, onQueued);
+    try { await operation(controller.signal); } finally { release(); }
+  },
+  owner = 'local',
 ): Promise<{ status: number; body: any }> {
   // POST /api/utility/materials-v2 - 启动生成任务
   if (method === 'POST' && url === MATERIALS_V2_PATH) {
     try {
       const parsed = parseGenerationRequest(body);
       if (!parsed.context) return { status: 400, body: { error: 'INVALID_INPUT', message: parsed.message || '生成上下文无效' } };
+      const context = parsed.context;
+      signal?.throwIfAborted();
 
       const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
       generationTasks.set(taskId, {
+        owner,
         status: 'running',
         progress: 0,
         message: '开始生成文档...',
         startedAt: new Date().toISOString(),
       });
 
-      const controller = new AbortController();
-      if (signal) signal.addEventListener('abort', () => controller.abort(), { once: true });
-
-      generatePatentDocument(
-        parsed.context,
-        config,
-        controller.signal,
-        {
-          ...parsed.options,
-          onProgress: (update) => {
-            const task = generationTasks.get(taskId);
-            if (task) {
-              task.progress = update.progress;
-              task.message = update.message;
-            }
-            progress?.(update);
+      schedule(async backgroundSignal => {
+        const result = await generatePatentDocument(
+          context,
+          config,
+          backgroundSignal,
+          {
+            ...parsed.options,
+            onProgress: (update) => {
+              const task = generationTasks.get(taskId);
+              if (task) {
+                task.progress = update.progress;
+                task.message = update.message;
+              }
+              progress?.(update);
+            },
           },
-        }
-      )
-        .then((result) => {
-          const task = generationTasks.get(taskId);
-          if (task) {
-            finishTask(task, result, parsed.context!, parsed.patentType!);
-          }
-        })
+        );
+        const task = generationTasks.get(taskId);
+        if (task) finishTask(task, result, context, parsed.patentType!);
+      }, position => {
+        const task = generationTasks.get(taskId);
+        if (task) task.message = `排队等待：当前第 ${position} 位`;
+      })
         .catch((error) => {
           const task = generationTasks.get(taskId);
           if (task) {
@@ -275,7 +284,7 @@ export async function handleMaterialsV2Request(
     }
 
     const task = generationTasks.get(taskId);
-    if (!task) {
+    if (!task || task.owner !== owner) {
       return { status: 404, body: { error: 'TASK_NOT_FOUND', message: '任务不存在' } };
     }
 

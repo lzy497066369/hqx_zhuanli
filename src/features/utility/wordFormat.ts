@@ -4,6 +4,11 @@ import {
 } from "docx";
 import type { Document, IParagraphOptions, ISectionOptions, IStylesOptions } from "docx";
 
+// No author or edit history is recorded by the app. Explicit empty values avoid
+// docx's "Un-named" author/editor and revision=1 defaults; 0 omits the XML field.
+// Creation/modification timestamps remain the library's actual export time.
+export const WORD_METADATA = { creator: "", lastModifiedBy: "", revision: 0 };
+
 // Measured from the reference patent. Page dimensions and margins are in twips.
 export const WORD_PAGE = {
   size: { width: 11906, height: 16838, orientation: PageOrientation.PORTRAIT },

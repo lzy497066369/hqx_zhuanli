@@ -3,18 +3,13 @@ import type { FormEvent } from "react";
 import {
   ArrowLeft,
   ArrowRight,
-  BookOpen,
   Box,
   Check,
-  CheckCheck,
   ChevronDown,
   CircleAlert,
-  Copy,
   FileText,
   Lightbulb,
   PencilRuler,
-  RotateCcw,
-  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 import type { Project } from "../../data";
@@ -26,6 +21,7 @@ import {
 } from "./naming";
 import type { CompanyProfile, NamingRecord } from "./naming";
 import { loadNamingDraftAsync, saveNamingDraft } from "../../storage/projectStorage";
+import { storageError as storageErrorMessage } from '../../storage/storageApi';
 import { isStructureEvidenceOptions, missingStructureEvidenceCategories, structureEvidenceCategoryLabels } from './structureEvidence';
 import type { StructureEvidenceCategory, StructureEvidenceOption } from './structureEvidence';
 import { GenerationProgress } from './generationProgress';
@@ -33,13 +29,6 @@ import type { ProgressStep } from './generationProgress';
 import { progressRequest, withAiRetry } from './progressRequest';
 import "./utility.css";
 
-const example: CompanyProfile = {
-  company: "示例光伏设备有限公司",
-  business: "光伏组件安装支架",
-  product: "",
-  features: "",
-  excludedTerms: "",
-};
 type ProductOption = { product: string; features: string[] };
 const shapeTerms = /形状|外形|轮廓|截面|弧形|曲面|曲线|槽|孔|叶片|齿形|纹路|折叠|弯折/u;
 const structureTerms = /连接|支架|壳体|底座|轴|齿轮|铰链|螺栓|螺纹|导轨|限位|定位|安装|固定|配合|组件/u;
@@ -105,12 +94,15 @@ export function UtilityNaming({
   patentType?: "utility" | "invention";
 }) {
   const [initialDraft, setInitialDraft] = useState<NamingRecord | null>(null);
+  const [loadError, setLoadError] = useState('');
   useEffect(() => {
     let cancelled = false;
     loadNamingDraftAsync(project?.id, project).then(draft => {
       if (cancelled) return;
       // oxlint-disable-next-line react/set-state-in-effect -- Async draft restore.
       setInitialDraft(draft);
+    }).catch(error => {
+      if (!cancelled) setLoadError(error instanceof Error ? error.message : '命名草稿加载失败。');
     });
     return () => {
       cancelled = true;
@@ -118,6 +110,7 @@ export function UtilityNaming({
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- project identity changes on every save; reload once per id (App remounts on id change via key).
   }, [project?.id]);
   if (!initialDraft) {
+    if (loadError) return <div className="empty-state"><p role="alert">{loadError}</p><button className="button secondary" onClick={() => location.reload()}>重新加载</button></div>;
     return (
       <div className="empty-state">
         <h2>正在加载命名草稿…</h2>
@@ -161,7 +154,6 @@ function UtilityNamingForm({
     text: string;
     field?: keyof CompanyProfile;
   } | null>(null);
-  const [notice, setNotice] = useState("");
   const [storageError, setStorageError] = useState(false);
   const [saved, setSaved] = useState(() => !!project?.naming && JSON.stringify(draft) === JSON.stringify(project.naming));
   const [titleOpen, setTitleOpen] = useState(!!draft.selectedName);
@@ -189,7 +181,6 @@ function UtilityNamingForm({
   const resultRef = useRef<HTMLElement>(null);
   const profile = draft.profile;
   const validation = checkName(draft.selectedName, profile);
-  const selected = draft.candidates.find((c) => c.name === draft.selectedName);
   const canSave =
     !!draft.selectedName &&
     !validation.errors.length &&
@@ -202,19 +193,17 @@ function UtilityNamingForm({
   // 草稿不应携带，避免重新打开页面时被误判为已保存。
   useEffect(() => {
     let cancelled = false;
-    const timer = setTimeout(() => {
+    const persist = () => {
       saveNamingDraft(project?.id, { ...draft, confirmed: false }).then(ok => {
         // oxlint-disable-next-line react/set-state-in-effect
         if (!cancelled) setStorageError(!ok);
       });
-    }, 400);
-    return () => { cancelled = true; clearTimeout(timer); };
+    };
+    const timer = setTimeout(persist, 400);
+    const flush = () => { clearTimeout(timer); persist(); };
+    window.addEventListener('zhichuang:flush-drafts', flush);
+    return () => { cancelled = true; clearTimeout(timer); window.removeEventListener('zhichuang:flush-drafts', flush); };
   }, [draft, project?.id]);
-  useEffect(() => {
-    if (!notice) return;
-    const timer = setTimeout(() => setNotice(""), 4500);
-    return () => clearTimeout(timer);
-  }, [notice]);
   const update = (key: keyof CompanyProfile, value: string) => {
     invalidateRequests();
     setDraft((d) => ({
@@ -333,14 +322,6 @@ function UtilityNamingForm({
       if (version === requestVersion.current) setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : '名称生成失败，请重试。' });
     } finally { if (version === requestVersion.current) setBusy(null); }
   };
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(draft.selectedName);
-      setNotice("名称已复制");
-    } catch {
-      setNotice("无法访问剪贴板，请在名称输入框中手动选择并复制。");
-    }
-  };
   const fieldError = (key: keyof CompanyProfile) =>
     errors[key] && (
       <p className="un-error" id={`utility-${key}-error`} role="alert">
@@ -359,7 +340,6 @@ function UtilityNamingForm({
           <h1>{isInvention ? "好发明，从一个准确的技术主题开始" : "好专利，从一个准确的名字开始"}</h1>
           <p>{isInvention ? "从企业业务和真实技术资料出发，形成可核对的技术方案。" : "从企业业务出发，找到清晰、客观的产品技术主题。"}</p>
         </div>
-        <span className="un-mode"><Sparkles size={15} />AI 选题 · 规则复核</span>
       </header>
       <ol className="un-steps" aria-label={`${isInvention ? "发明专利" : "实用新型"}创作步骤`}>
         <li aria-current="step">
@@ -409,7 +389,6 @@ function UtilityNamingForm({
             <span className="un-number">01</span>
             <div>
               <h2 id="company-heading">先了解你的企业</h2>
-              <p>信息越具体，名称越贴近实际产品</p>
             </div>
           </div>
           <form onSubmit={(event) => void generateOptions(event)} noValidate>
@@ -425,13 +404,10 @@ function UtilityNamingForm({
               required
               aria-invalid={!!errors.company}
               aria-describedby={
-                errors.company ? "utility-company-error" : "company-hint"
+                errors.company ? "utility-company-error" : undefined
               }
             />
             {fieldError("company")}
-            <p className="un-hint" id="company-hint">
-              仅用于项目归属，不会拼入专利名称。
-            </p>
             <label htmlFor="utility-business">
               产品名称 <span className="required">*</span>
             </label>
@@ -524,44 +500,11 @@ function UtilityNamingForm({
                 ) : null}
               </div>
             )}
-            <button
-              type="button"
-              className="un-example"
-              onClick={() => {
-                if (
-                  (profile.company ||
-                    profile.business ||
-                    profile.product ||
-                    draft.selectedName) &&
-                  !window.confirm("加载示例将替换当前命名草稿，是否继续？")
-                )
-                  return;
-                invalidateRequests();
-                setOptions([]); setBusy(null);
-                setDraft({
-                  version: 1,
-                  profile: example,
-                  options: [],
-                  candidates: [],
-                  selectedName: "",
-                  confirmed: false,
-                });
-                setErrors({});
-                setMessage("");
-                setFeedback(null);
-                setTitleOpen(false);
-                setSaved(false);
-              }}
-            >
-              <RotateCcw size={13} />
-              试填一份光伏企业示例
-            </button>
-            <p className="un-privacy">
-              <ShieldCheck size={13} />
-              {storageError
-                ? "浏览器存储不可用，请及时复制名称。"
-                : "草稿保存在此浏览器；生成建议时会向 AI 服务发送企业与产品信息。"}
-            </p>
+            {storageError && (
+              <p className="un-error" role="alert">
+                {storageErrorMessage()} 请及时复制名称。
+              </p>
+            )}
           </form>
         </section>
         <div className="un-right">
@@ -659,178 +602,36 @@ function UtilityNamingForm({
                 ))}
               </div>
             )}
-            <div className="un-disclaimer">
-              <CircleAlert size={15} />
-              <p>
-                AI 建议不等于已核实的技术方案。系统不判断新颖性或可授权性；请选择产品实际具备的结构。
-              </p>
-            </div>
-          </section>
-          {titleOpen && (
-            <section
-              className="un-panel un-confirm"
-              aria-labelledby="confirm-heading"
-            >
-              <div className="un-panel-heading">
-                <span className="un-number">03</span>
-                <div>
-                  <h2 id="confirm-heading">确认本次名称</h2>
-                  <p>可直接修改，规则检查会同步更新</p>
-                </div>
+            {titleOpen && (
+              <div className="un-name-confirm">
+                <input
+                  id="utility-title"
+                  aria-label={isInvention ? "发明专利名称" : "实用新型名称"}
+                  value={draft.selectedName}
+                  onChange={(e) => {
+                    setDraft((d) => ({ ...d, selectedName: e.target.value }));
+                    setSaved(false);
+                  }}
+                  aria-invalid={!!validation.errors.length}
+                />
                 <button
-                  className="icon-button"
-                  aria-label="复制选中名称"
-                  onClick={copy}
-                >
-                  <Copy size={18} />
-                </button>
-              </div>
-              <label htmlFor="utility-title">{isInvention ? "发明专利名称" : "实用新型名称"}</label>
-              <input
-                id="utility-title"
-                value={draft.selectedName}
-                onChange={(e) => {
-                  setDraft((d) => ({
-                    ...d,
-                    selectedName: e.target.value,
-                  }));
-                  setSaved(false);
-                }}
-                aria-describedby="title-validation"
-                aria-invalid={!!validation.errors.length}
-              />
-              <div id="title-validation" aria-live="polite">
-                <p className="un-title-count">
-                  {validation.length} 字 / 本系统上限 40 字
-                </p>
-                {validation.errors.map((e) => (
-                  <p className="un-error" key={e}>
-                    <CircleAlert size={14} />
-                    {e}
-                  </p>
-                ))}
-                {validation.warnings.map((w) => (
-                  <p className="un-warning" key={w}>
-                    {w}
-                  </p>
-                ))}
-                {!validation.errors.length && (
-                  <p className="un-pass">
-                    <CheckCheck size={15} />
-                    基础规则检查未发现阻断项，仍需人工复核。
-                  </p>
-                )}
-              </div>
-              {selected && (
-                <p className="un-hint">
-                  保护客体：{selected.product} · {profile.improvementType ? `${improvementTypes[profile.improvementType]} · ` : ''}结构限定：{selected.feature}
-                </p>
-              )}
-              <div className="un-save-row">
-                <span>
-                  {saved
-                    ? "名称已保存，可在项目管理中查看"
-                    : "保存后仍可返回修改"}
-                </span>
-                <button
+                  type="button"
                   className="button primary"
-                  disabled={!canSave || saved}
+                  disabled={!canSave || !!busy || (saved && !onOpenWorkspace)}
                   onClick={() => {
-                    if (!canSave) return;
+                    if (!canSave || busy) return;
+                    if (saved) { onOpenWorkspace?.(); return; }
                     onSave({ ...draft, confirmed: true });
                     setSaved(true);
                   }}
                 >
                   <Check size={16} />
-                  {saved ? "已保存名称" : "确认名称并检查产品逻辑"}
+                  {saved ? "进入产品预览与材料工作区" : "确认名称并检查产品逻辑"}
                 </button>
-                {(saved || (project && draft.selectedName === project.name)) && onOpenWorkspace && (
-                  <button className="button secondary" onClick={onOpenWorkspace}>
-                    <PencilRuler size={16} />
-                    进入产品预览与材料工作区
-                  </button>
-                )}
               </div>
-              <p className="un-hint">
-                保存名称后，将全部选择和初步名称交给 AI 检查逻辑；去除矛盾后生成详细简介和彩色三视图。确认预览后才生成文档和黑白附图。
-              </p>
-            </section>
-          )}
-          <section className="un-rules" aria-labelledby="rules-heading">
-            <h2 id="rules-heading">
-              <BookOpen size={17} />
-              命名的四个关键词
-            </h2>
-            <div className="un-rule-grid">
-              <div>
-                <strong>清楚</strong>
-                <p>
-                  写明产品客体
-                  <br />
-                  不只写“装置”
-                </p>
-              </div>
-              <div>
-                <strong>客观</strong>
-                <p>
-                  不带宣传色彩
-                  <br />
-                  不含品牌型号
-                </p>
-              </div>
-              <div>
-                <strong>准确</strong>
-                <p>
-                  围绕实际构造
-                  <br />
-                  不替代技术方案
-                </p>
-              </div>
-              <div>
-                <strong>简洁</strong>
-                <p>
-                  建议 15–25 字<br />
-                  删除多余修饰
-                </p>
-              </div>
-            </div>
-            <details>
-              <summary>
-                查看命名规则与使用边界
-                <ChevronDown size={15} />
-              </summary>
-              <ul>
-                <li>
-                  名称应清楚、简要地表明技术主题，采用本技术领域通用术语。
-                </li>
-                <li>
-                  《专利审查指南》通常要求名称不超过 25
-                  字，必要时可放宽但不得超过 60 字。本系统按业务要求采用建议
-                  15–25 字、最多 40 字；不足 15 字仅提示。
-                </li>
-                <li>
-                  “一种”是本系统的模板偏好，不是法定必需前缀。“新型、高效、节能、低阻力”等按本项目严格规则拦截，不将技术效果当成结构特征。
-                </li>
-                <li>
-                  以明确的产品客体为重心，优先描述形状、构造及连接关系。系统仅进行词库辅助检查，不能穷举商标、人名、型号或判断技术真实性。
-                </li>
-                <li>
-                  AI 推荐的保护客体及结构特征需由你核对真实性；名称仍须通过本地规则检查。
-                </li>
-              </ul>
-              <a
-                href="https://www.cnipa.gov.cn/module/download/down.jsp?colID=2790&i_ID=189500"
-                target="_blank"
-                rel="noreferrer"
-              >
-                到国家知识产权局核对现行《专利审查指南》 ↗
-              </a>
-            </details>
+            )}
           </section>
         </div>
-      </div>
-      <div className="un-notice" role="status" aria-live="polite">
-        {notice}
       </div>
     </div>
   );

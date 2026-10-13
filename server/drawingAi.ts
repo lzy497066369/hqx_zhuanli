@@ -8,7 +8,9 @@ import { GEOMETRY_HELP, GEOMETRY_FORMAT } from '../src/features/utility/contentD
 import { AiFailure, STRICT_E2E_POLICY, AI_USER_AGENT, aiProviders, availableProviders, markProviderFailed, markProviderSucceeded, responseText, shouldCoolDownProvider } from './aiSupport.ts';
 import type { AiConfig } from './aiSupport.ts';
 import { createProductWorkflowService, PRODUCT_PATHS } from './productWorkflowAi.ts';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { GenerationQueue } from './generationQueue.ts';
+import { requestContext } from './requestContext.ts';
 import { flushStructureLog, recordStructureLog } from './structureLog.ts';
 import { researchPatents } from './patentResearch.ts';
 import { handlePatentStructureRequest, INNOVATION_CANDIDATES_PATH, STRUCTURE_PLAN_PATH, STRUCTURE_DRAFT_PATH } from './patentStructureAi.ts';
@@ -188,14 +190,18 @@ function allowedLocalRequest(req: IncomingMessage) {
   } catch { return false; }
 }
 export function createAiMiddleware(config: AiConfig, fetcher: typeof fetch = fetch) {
-  let active = 0;
-  let starts: number[] = [];
-  let productStarts: number[] = [];
+  const queue = new GenerationQueue();
+  const expiryTimer = setInterval(() => queue.expire(), 30000);
+  expiryTimer.unref();
   const productService = createProductWorkflowService(config, fetcher);
   return async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
     const path = (req.url || '').split('?')[0];
     const materialsStatusRequest = path.startsWith(`${MATERIALS_V2_STATUS_PATH}/`);
-    if (!AI_PATHS.has(path) && !materialsStatusRequest) { next(); return; }
+    const generationRequest = ['/api/generation/begin', '/api/generation/heartbeat', '/api/generation/end'].includes(path);
+    if (!AI_PATHS.has(path) && !materialsStatusRequest && !generationRequest) { next(); return; }
+    const context = requestContext(req);
+    const owner = createHash('sha256').update(context ? `${context.userId}:${context.workspaceId}` : req.headers.cookie || 'local').digest('hex');
+    const token = typeof req.headers['x-generation-token'] === 'string' ? req.headers['x-generation-token'] : undefined;
     const productRequest = Object.values(PRODUCT_PATHS).some(value => value === path);
     const structureRequest = path === STRUCTURE_DRAFT_PATH || path === STRUCTURE_SKELETON_PATH;
     const streaming = req.headers.accept?.includes('application/x-ndjson') === true;
@@ -205,7 +211,9 @@ export function createAiMiddleware(config: AiConfig, fetcher: typeof fetch = fet
       res.setHeader('X-Structure-Request-Id', requestId);
       recordStructureLog({ requestId, stage: 'request', elapsedMs: 0, outcome: 'started' });
     }
-    let acquired = false;
+    let release: (() => void) | undefined;
+    let leaveStep: (() => void) | undefined;
+    let queueTimer: ReturnType<typeof setInterval> | undefined;
     const controller = new AbortController();
     const disconnected = () => { if (!res.writableEnded) controller.abort(); };
     res.on('close', disconnected);
@@ -219,16 +227,40 @@ export function createAiMiddleware(config: AiConfig, fetcher: typeof fetch = fet
         if (!res.destroyed && !res.writableEnded) res.end(`${JSON.stringify({ type: 'result', data })}\n`);
       } else send(res, 200, data);
     };
+    const waitForSlot = async (signal: AbortSignal, report = progress) => {
+      let position = 0;
+      const update = () => report?.('排队等待', `当前排队第 ${position} 位，系统最多同时生成 10 份专利。`);
+      const pending = queue.acquire(signal, value => { position = value; update(); });
+      queueTimer = setInterval(() => { queue.expire(); if (position) update(); }, 15000);
+      try { return await pending; } finally { clearInterval(queueTimer); queueTimer = undefined; }
+    };
     try {
       if (!allowedLocalRequest(req)) throw new AiFailure(403, 'LOCAL_ONLY', '此 AI 接口仅允许本机同源访问；公开部署前需增加账户鉴权。');
       if (materialsStatusRequest) {
         if (req.method !== 'GET') throw new AiFailure(405, 'METHOD_NOT_ALLOWED', '任务状态仅支持 GET 请求。');
-        const response = await handleMaterialsV2Request(path, 'GET', undefined, config);
+        const response = await handleMaterialsV2Request(path, 'GET', undefined, config, undefined, undefined, undefined, owner);
         send(res, response.status, response.body);
         return;
       }
       if (req.method !== 'POST') throw new AiFailure(405, 'METHOD_NOT_ALLOWED', '仅支持 POST 请求。');
       if (!req.headers['content-type']?.startsWith('application/json')) throw new AiFailure(415, 'JSON_REQUIRED', '请以 JSON 格式提交技术内容。');
+      if (generationRequest) {
+        await readBody(req, 1024);
+        if (path === '/api/generation/begin') {
+          // Reserve before returning the token, so a new generation cannot jump the FIFO queue.
+          let position = 0;
+          const update = () => progress?.('排队等待', `当前排队第 ${position} 位，系统最多同时生成 10 份专利。`);
+          queueTimer = setInterval(() => { queue.expire(); if (position) update(); }, 15000);
+          const granted = await queue.begin(owner, controller.signal, value => { position = value; update(); });
+          if (controller.signal.aborted) { queue.end(granted, owner); controller.signal.throwIfAborted(); }
+          finish({ token: granted });
+        } else {
+          if (!token) throw new AiFailure(400, 'GENERATION_TOKEN_REQUIRED', '缺少本次专利生成标识。');
+          if (path === '/api/generation/end') queue.end(token, owner); else queue.heartbeat(token, owner);
+          send(res, 200, { success: true });
+        }
+        return;
+      }
       // CAD 阶段要上传四张彩色预览给视觉模型，请求体上限单独放宽。
       const body = await readBody(req, path === AI_PATH ? 64 * 1024 : path === PRODUCT_PATHS.cad ? 48 * 1024 * 1024 : 3 * 1024 * 1024);
       if (path === AI_PATH && !isPlanInput(body)) throw new AiFailure(400, 'INVALID_INPUT', '请提供有效的专利名称；产品方案模式不需要预先填写结构和原理。');
@@ -242,6 +274,12 @@ export function createAiMiddleware(config: AiConfig, fetcher: typeof fetch = fet
           config,
           controller.signal,
           progress ? update => progress('文档生成', update.message) : undefined,
+          async (operation, onQueued) => {
+            const background = new AbortController();
+            const releaseTask = token ? queue.enter(token, owner, background) : await queue.acquire(background.signal, onQueued);
+            try { await operation(background.signal); } finally { if (token) queue.end(token, owner); releaseTask(); }
+          },
+          owner,
         );
         send(res, v2Response.status, v2Response.body);
         return;
@@ -259,11 +297,9 @@ export function createAiMiddleware(config: AiConfig, fetcher: typeof fetch = fet
         return;
       }
       checkConfig(config);
-      starts = starts.filter(time => Date.now() - time < 60000);
-      // 并发上限 3、每分钟 8 次：配合前端请求取消（废弃请求及时释放槽位），多步骤连续生成不再频繁触发限流。
-      productStarts = productStarts.filter(time => Date.now() - time < 60000);
-      if (active >= 3 || (productRequest ? productStarts.length >= 24 : starts.length >= 8)) throw new AiFailure(429, 'LOCAL_RATE_LIMIT', '生成任务较多，请等待当前任务结束或一分钟后重试。');
-      active++; acquired = true; (productRequest ? productStarts : starts).push(Date.now());
+      if (token) leaveStep = queue.enter(token, owner, controller);
+      else release = await waitForSlot(controller.signal);
+      controller.signal.throwIfAborted();
       // 先记录终态并等其落盘，再发出响应：诊断日志按 requestId 回溯一次请求的完整
       // 时间线，若终态记录还在写入队列里就返回，调用方立刻读文件会读不到它。
       const result = productRequest ? await productService(path, body, controller.signal, progress)
@@ -275,9 +311,11 @@ export function createAiMiddleware(config: AiConfig, fetcher: typeof fetch = fet
         // Whitelist fields: do not forward browser-supplied URLs, model names, keys or company data.
         : path === AI_PATH ? await generateDrawingPlan({ title: (body as DrawingPlanInput).title, technicalField: (body as DrawingPlanInput).technicalField, structure: (body as DrawingPlanInput).structure, workingPrinciple: (body as DrawingPlanInput).workingPrinciple, ...((body as DrawingPlanInput).mode === 'concept' ? { mode: 'concept' as const } : {}) }, config, controller.signal, fetcher)
         : await handlePatentStructureRequest(path, body, config, controller.signal, fetcher, requestId, progress);
+      if (token && path === PRODUCT_PATHS.materials) queue.end(token, owner);
       if (requestId) { recordStructureLog({ requestId, stage: 'request', httpStatus: 200, elapsedMs: Date.now() - startedAt, outcome: 'completed' }); await flushStructureLog(); }
       if (path === STRUCTURE_ANSWERS_PATH || path === AI_PATH) send(res, 200, result); else finish(result);
     } catch (error) {
+      if (token && !generationRequest && (leaveStep || controller.signal.aborted)) queue.end(token, owner);
       const failure = error instanceof AiFailure ? error : new AiFailure(500, 'SERVER_ERROR', '生成服务暂时不可用，请稍后重试。');
       // 每个失败的接口响应都留一行：以前容器日志里只有启动行，用户报错时无从回溯是哪个接口、什么错误码。
       // 只记路径、状态码、错误码和耗时，不记请求内容。
@@ -287,6 +325,6 @@ export function createAiMiddleware(config: AiConfig, fetcher: typeof fetch = fet
       if (streaming && res.headersSent) {
         if (!res.destroyed && !res.writableEnded) res.end(`${JSON.stringify({ type: 'error', error: { code: failure.code, message: failure.message, ...details } })}\n`);
       } else send(res, failure.status, { error: { code: failure.code, message: failure.message, ...details } });
-    } finally { if (acquired) active--; res.off('close', disconnected); }
+    } finally { clearInterval(queueTimer); leaveStep?.(); release?.(); res.off('close', disconnected); }
   };
 }

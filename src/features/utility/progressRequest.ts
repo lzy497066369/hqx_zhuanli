@@ -1,10 +1,11 @@
 import { STRICT_E2E_POLICY } from './aiExecutionPolicy';
 import type { ProgressStep } from './generationProgress';
+import { workspaceHeaders } from '../../storage/workspaceContext';
 
 type StreamEvent = { type: 'progress'; step: ProgressStep } | { type: 'result'; data: unknown } | { type: 'error'; error: { code?: string; message?: string; details?: string[] } };
 
-export async function progressRequest<T>(path: string, body: unknown, onProgress: (step: ProgressStep) => void, signal?: AbortSignal): Promise<{ data: T; requestId?: string }> {
-  const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' }, body: JSON.stringify(body), signal });
+export async function progressRequest<T>(path: string, body: unknown, onProgress: (step: ProgressStep) => void, signal?: AbortSignal, headers: Record<string, string> = {}): Promise<{ data: T; requestId?: string }> {
+  const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson', ...workspaceHeaders(), ...headers }, body: JSON.stringify(body), signal });
   const requestId = response.headers.get('X-Structure-Request-Id') || undefined;
   if (response.headers.get('Content-Type')?.includes('application/x-ndjson')) {
     // 带 code 与 requestId 抛出：调用方据此渲染具体原因和诊断编号，而不是回退到泛化文案。

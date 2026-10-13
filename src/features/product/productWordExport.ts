@@ -2,7 +2,7 @@ import { Document, ImageRun, Paragraph, TextRun } from 'docx';
 import type { CadViewDrawing, ProductImage, ProductPreview, ProductWorkflow } from './productWorkflow';
 import { CAD_VIEWS, PREVIEW_VIEWS, hasCurrentCad, isProductWorkflow, isProductWorkflowComplete } from './productWorkflow';
 import { PATENT_FIGURE_TEMPLATES } from './productPrompts';
-import { fitWordImage, packPatentWord, patentSection, WORD_BODY, WORD_BODY_PARAGRAPH, WORD_STYLES, wordCaption, wordHeading, wordImageParagraph, wordTitle } from '../utility/wordFormat';
+import { fitWordImage, packPatentWord, patentSection, WORD_BODY, WORD_BODY_PARAGRAPH, WORD_METADATA, WORD_STYLES, wordCaption, wordHeading, wordImageParagraph, wordTitle } from '../utility/wordFormat';
 import { sha256Hex } from './digest';
 
 function body(text: string): Paragraph {
@@ -107,7 +107,7 @@ export async function createProductWordBlob(workflow: ProductWorkflow): Promise<
     for (const [index, template] of PATENT_FIGURE_TEMPLATES.entries()) addFigure(await patentImageForWord(workflow.figures[template.id]), index, template.title);
   }
   // 正式申请文件只含摘要、权利要求书、说明书和说明书附图；简介、提示词、建模脚本等生成记录不进入 Word。
-  const document = new Document({ creator: '知创工坊', title: materials.title, description: '依据已确认产品简介生成的专利申请初稿与黑白附图',
+  const document = new Document({ ...WORD_METADATA, title: materials.title,
     styles: WORD_STYLES, sections: [
       patentSection('说 明 书 摘 要', [wordTitle(materials.title), ...paragraphs(materials.abstract)]),
       patentSection('权 利 要 求 书', [wordTitle(materials.title), ...materials.claims.flatMap(claim => paragraphs(claim))]),
