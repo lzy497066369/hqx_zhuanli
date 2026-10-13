@@ -39,6 +39,22 @@ test('系统：不合格模型输出不可采用，备用结果也要校验', as
   await expect(generateNamingNames({ profile: { ...emptyProfile, company: '钢材公司', business: '钢材', product: '钢结构', features: 'H型截面' }, previous: [] }, config, new AbortController().signal, async () => envelope(names))).rejects.toMatchObject({ code: 'INVALID_INPUT' });
 });
 
+test('输入本身为安装支架时保留支架选题，首轮合格结果不切换模型；光伏板不能改成其支架', async () => {
+  const offered = { options: ['固定倾角', '可调倾角', '折叠式', '配重式', '立柱式'].map(prefix => ({
+    product: `${prefix}光伏组件安装支架`, features: ['T形滑槽', '锁紧螺栓', '防脱挡边'],
+  })) };
+  const calls: string[] = [];
+  const fetcher: typeof fetch = async (_url, init) => {
+    calls.push(JSON.parse(String(init?.body)).model);
+    return envelope(offered);
+  };
+  const result = await generateNamingOptions({ company: '流程验证公司', business: '光伏组件安装支架', previous: [] }, config, new AbortController().signal, fetcher);
+  expect(result.options).toHaveLength(5);
+  expect(calls).toEqual([config.model]);
+  const accessory = { options: ['滑槽式', '折叠式', '配重式'].map(prefix => ({ product: `${prefix}光伏板安装支架`, features: ['T形滑槽', '锁紧螺栓'] })) };
+  await expect(generateNamingOptions({ company: '流程验证公司', business: '光伏板', previous: [] }, config, new AbortController().signal, async () => envelope(accessory))).rejects.toMatchObject({ code: 'AI_INVALID_OPTIONS' });
+});
+
 test('名称首轮不足三项时自动修复，并保持已选客体、特征和历史名称不变', async () => {
   const previous = ['一种带定位孔的H型钢梁'];
   const first = { names: ['一种带螺栓连接板的H型钢梁'] };

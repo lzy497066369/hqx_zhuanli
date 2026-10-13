@@ -64,7 +64,7 @@ export function makeImage(brief = makeBrief(), kind: 'preview' | 'patent' = 'pre
   return { ...reference, dataUrl: `data:image/png;base64,${imageBytes.toString('base64')}`, model: productConfig.image!.model,
     prompt: kind === 'preview' ? buildPreviewPrompt(brief, templateId) : buildPatentFigurePrompt(brief, templateId) };
 }
-/** 四张并行彩色预览及其签名集合，与服务端 preview 路由返回的结构一致。 */
+/** 四张彩色预览及其签名集合，与服务端 preview 路由返回的结构一致。 */
 export function makePreview(brief = makeBrief(), id = `preview-${brief.id}`): ProductPreview {
   const images = PREVIEW_VIEWS.map(view => makeImage(brief, 'preview', `image-${brief.id}-${view.id}`, view.templateId));
   const digest = createHash('sha256').update(images.map(image => `${image.templateId}:${image.digest}`).join('\n')).digest('hex');

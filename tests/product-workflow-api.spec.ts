@@ -13,11 +13,16 @@ import { documentContent, imageBytes, jsonEnvelope, logicalResult, makeBrief, ma
 
 const signal = () => new AbortController().signal;
 const imageEnvelope = () => new Response(JSON.stringify({ data: [{ b64_json: imageBytes.toString('base64') }] }));
+function requestPayload(init?: RequestInit): Record<string, unknown> {
+  if (!(init?.body instanceof FormData)) return JSON.parse(String(init?.body || '{}'));
+  const payload = Object.fromEntries(init.body.entries());
+  return { ...payload, n: Number(payload.n) };
+}
 function modelFetcher(calls: { url: string; payload: Record<string, unknown>; auth: string | null }[]): typeof fetch {
   return async (url, init) => {
-    const payload = JSON.parse(String(init?.body || '{}'));
+    const payload = requestPayload(init);
     calls.push({ url: String(url), payload, auth: new Headers(init?.headers).get('Authorization') });
-    if (String(url).endsWith('/images/generations')) return imageEnvelope();
+    if (String(url).includes('/images/')) return imageEnvelope();
     const prompt = payload.messages[0].content as string;
     const user = payload.messages[1].content;
     const input = JSON.parse(typeof user === 'string' ? user : user[0].text);
@@ -68,7 +73,7 @@ test('四个预览视角各自注入同一简介且只画一个视角；黑白�
   expect(() => buildPreviewPrompt(brief, 'color-preview')).toThrow();
   expect(buildPreviewPrompt({ ...brief, description: '$& $` $\' 原始简介' }, 'color-hero')).toContain('$& $` $\' 原始简介');
 });
-test('独立文本与生图密钥只在服务器配置，四张预览并行生成，确认后走 FreeCAD 附图与文案', async () => {
+test('独立文本与生图密钥只在服务器配置，先生成主体图再上传参考图生成三视图，确认后走 FreeCAD 附图与文案', async () => {
   const settings = readAiConfig({ AI_BASE_URL: productConfig.baseUrl, AI_API_KEY: productConfig.apiKey, AI_MODEL: productConfig.model,
     AI_IMAGE_BASE_URL: productConfig.image!.baseUrl, AI_IMAGE_API_KEY: productConfig.image!.apiKey, AI_IMAGE_MODEL: productConfig.image!.model });
   expect(settings.image).toEqual(productConfig.image);
@@ -81,8 +86,16 @@ test('独立文本与生图密钥只在服务器配置，四张预览并行生�
   expect(preview.images.map(image => image.templateId)).toEqual(PREVIEW_VIEWS.map(view => view.templateId));
   const again = await service(PRODUCT_PATHS.preview, { brief }, signal()) as ProductPreview;
   expect(again.id).toBe(preview.id);
-  expect(calls.filter(call => call.url.endsWith('/images/generations'))).toHaveLength(4);
-  const sentPrompts = calls.filter(call => call.url.endsWith('/images/generations')).map(call => String(call.payload.prompt));
+  expect(calls.filter(call => call.url.endsWith('/images/generations'))).toHaveLength(1);
+  const edits = calls.filter(call => call.url.endsWith('/images/edits'));
+  expect(edits).toHaveLength(3);
+  for (const edit of edits) {
+    const image = edit.payload.image as File;
+    expect(image.type).toBe('image/png');
+    expect(Buffer.from(await image.arrayBuffer())).toEqual(Buffer.from(preview.images[0].dataUrl.split(',')[1], 'base64'));
+    expect(edit.payload.prompt).toContain('上传的图片是本产品已生成的主体图');
+  }
+  const sentPrompts = calls.filter(call => call.url.includes('/images/')).map(call => String(call.payload.prompt));
   expect(new Set(sentPrompts).size).toBe(4); expect(sentPrompts.every(prompt => prompt.includes(brief.description))).toBe(true);
   await expect(service(PRODUCT_PATHS.figure, { brief, templateId: 'patent-structure' }, signal())).rejects.toMatchObject({ code: 'PREVIEW_CONFIRMATION_REQUIRED' });
   await expect(service(PRODUCT_PATHS.cad, { brief, images: [] }, signal())).rejects.toMatchObject({ code: 'PREVIEW_CONFIRMATION_REQUIRED' });
@@ -187,12 +200,12 @@ test('一个视角失败时其余视角保留，重试只补缺失视角', async
   let attempts = 0;
   const service = createProductWorkflowService(productConfig, async (_url, init) => {
     attempts++;
-    const prompt = String(JSON.parse(String(init?.body)).prompt);
+    const prompt = String(requestPayload(init).prompt);
     if (attempts <= 4 && prompt.includes('从产品正右方')) return new Response('boom', { status: 500 });
     return imageEnvelope();
   });
   const brief = makeBrief();
-  await expect(service(PRODUCT_PATHS.preview, { brief }, signal())).rejects.toMatchObject({ code: 'IMAGE_UPSTREAM', message: expect.stringContaining('3 张视图已生成并保留') });
+  await expect(service(PRODUCT_PATHS.preview, { brief }, signal())).rejects.toMatchObject({ code: 'IMAGE_REFERENCE_UPSTREAM', message: expect.stringContaining('3 张视图已生成并保留') });
   expect(attempts).toBe(4);
   const preview = await service(PRODUCT_PATHS.preview, { brief }, signal()) as ProductPreview;
   expect(attempts).toBe(5); expect(preview.images).toHaveLength(4);
@@ -228,15 +241,77 @@ test('服务商分组未开通生图和非生图模型分别返回可操作提�
   const wrongModel = () => Promise.resolve(new Response(JSON.stringify({ error: { message: 'images endpoint requires an image model, got muse-spark-1.3' } }), { status: 400 }));
   await expect(generateProductImage(makeBrief(), 'preview', 'color-hero', productConfig, signal(), wrongModel)).rejects.toMatchObject({ code: 'IMAGE_MODEL_UNSUPPORTED' });
 });
-test('同一版本的并发预览请求不会重复计费，四个视角各只提交一次，完成后复用缓存', async () => {
-  let release!: () => void; let started!: () => void; let calls = 0;
-  const pending = new Promise<void>(resolve => { release = resolve; });
+test('主体图完成前不提交三视图，完成后并行上传同一主体图，并发请求及完成后重试不重复计费', async () => {
+  let releaseHero!: () => void; let started!: () => void; let releaseViews!: () => void; let viewsStarted!: () => void;
+  const heroPending = new Promise<void>(resolve => { releaseHero = resolve; });
   const called = new Promise<void>(resolve => { started = resolve; });
-  const service = createProductWorkflowService(productConfig, async () => { calls++; started(); await pending; return imageEnvelope(); });
+  const viewsPending = new Promise<void>(resolve => { releaseViews = resolve; });
+  const allViewsStarted = new Promise<void>(resolve => { viewsStarted = resolve; });
+  const calls: { url: string; body: RequestInit['body'] }[] = [];
+  const service = createProductWorkflowService(productConfig, async (url, init) => {
+    calls.push({ url: String(url), body: init?.body });
+    if (String(url).endsWith('/generations')) { started(); await heroPending; }
+    else {
+      expect(init?.body).toBeInstanceOf(FormData);
+      expect(new Headers(init?.headers).has('Content-Type')).toBe(false);
+      if (calls.length === 4) viewsStarted();
+      await viewsPending;
+    }
+    return imageEnvelope();
+  });
   const input = { brief: makeBrief() };
   const first = service(PRODUCT_PATHS.preview, input, signal());
   await called;
+  expect(calls.map(call => call.url)).toEqual([`${productConfig.image!.baseUrl}/images/generations`]);
   await expect(service(PRODUCT_PATHS.preview, input, signal())).rejects.toMatchObject({ code: 'PRODUCT_REQUEST_RUNNING' });
-  release(); const generated = await first;
-  expect(await service(PRODUCT_PATHS.preview, input, signal())).toEqual(generated); expect(calls).toBe(4);
+  releaseHero(); await allViewsStarted;
+  expect(calls.slice(1).every(call => call.url.endsWith('/images/edits'))).toBe(true);
+  releaseViews(); const generated = await first;
+  expect(await service(PRODUCT_PATHS.preview, input, signal())).toEqual(generated); expect(calls).toHaveLength(4);
+});
+
+test('主体图失败或生成期间取消时不提交三视图，重试从主体图继续', async () => {
+  const calls: string[] = [];
+  const service = createProductWorkflowService(productConfig, async url => {
+    calls.push(String(url));
+    return calls.length === 1 ? new Response('failed', { status: 500 }) : imageEnvelope();
+  });
+  const input = { brief: makeBrief() };
+  await expect(service(PRODUCT_PATHS.preview, input, signal())).rejects.toMatchObject({ code: 'IMAGE_UPSTREAM' });
+  expect(calls).toHaveLength(1);
+  const preview = await service(PRODUCT_PATHS.preview, input, signal()) as ProductPreview;
+  expect(preview.images).toHaveLength(4);
+  expect(calls.filter(url => url.endsWith('/generations'))).toHaveLength(2);
+  expect(calls.filter(url => url.endsWith('/edits'))).toHaveLength(3);
+
+  const controller = new AbortController();
+  const cancelledCalls: string[] = [];
+  const cancelled = createProductWorkflowService(productConfig, async url => {
+    cancelledCalls.push(String(url)); controller.abort(); return imageEnvelope();
+  });
+  await expect(cancelled(PRODUCT_PATHS.preview, input, controller.signal)).rejects.toBeTruthy();
+  expect(cancelledCalls).toHaveLength(1);
+});
+
+test('三视图缺少同版本主体参考图或参考图内容被修改时不向上游提交请求', async () => {
+  let calls = 0;
+  const fetcher: typeof fetch = async () => { calls++; return imageEnvelope(); };
+  const brief = makeBrief();
+  await expect(generateProductImage(brief, 'preview', 'color-front', productConfig, signal(), fetcher)).rejects.toMatchObject({ code: 'PREVIEW_REFERENCE_REQUIRED' });
+  await expect(generateProductImage(brief, 'preview', 'color-top', productConfig, signal(), fetcher, makeImage(makeBrief(makeReview(), 'other-brief')))).rejects.toMatchObject({ code: 'PREVIEW_REFERENCE_REQUIRED' });
+  await expect(generateProductImage(brief, 'preview', 'color-right', productConfig, signal(), fetcher, { ...makeImage(brief), digest: '0'.repeat(64) })).rejects.toMatchObject({ code: 'PREVIEW_REFERENCE_INVALID' });
+  expect(calls).toBe(0);
+});
+
+test('服务商不支持参考图时保留主体图，不降级文字生图，重试复用主体图', async () => {
+  const calls: string[] = [];
+  const service = createProductWorkflowService(productConfig, async url => {
+    calls.push(String(url));
+    return String(url).endsWith('/edits') ? new Response('private image-test-secret', { status: 404 }) : imageEnvelope();
+  });
+  const input = { brief: makeBrief() };
+  await expect(service(PRODUCT_PATHS.preview, input, signal())).rejects.toMatchObject({ code: 'IMAGE_REFERENCE_UPSTREAM', message: expect.stringContaining('1 张视图已生成并保留') });
+  await expect(service(PRODUCT_PATHS.preview, input, signal())).rejects.toMatchObject({ code: 'IMAGE_REFERENCE_UPSTREAM', message: expect.stringContaining('images/edits') });
+  expect(calls.filter(url => url.endsWith('/generations'))).toHaveLength(1);
+  expect(calls.filter(url => url.endsWith('/edits'))).toHaveLength(6);
 });

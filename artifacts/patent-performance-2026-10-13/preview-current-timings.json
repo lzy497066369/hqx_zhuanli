@@ -1,0 +1,73 @@
+{
+  "startedAt": "2026-10-13T03:51:01.909Z",
+  "requests": [
+    {
+      "id": 1,
+      "endpoint": "/v1/images/generations",
+      "model": "gpt-image-2.5",
+      "promptChars": 4488,
+      "referenceBytes": 0,
+      "startedMs": 10,
+      "status": 200,
+      "headersMs": 26444,
+      "bytes": 4203191,
+      "totalMs": 28002
+    },
+    {
+      "id": 2,
+      "endpoint": "/v1/images/edits",
+      "model": "gpt-image-2.5",
+      "promptChars": 4606,
+      "referenceBytes": 1570957,
+      "startedMs": 28032,
+      "status": 200,
+      "headersMs": 31304,
+      "bytes": 3233208,
+      "totalMs": 32636
+    },
+    {
+      "id": 3,
+      "endpoint": "/v1/images/edits",
+      "model": "gpt-image-2.5",
+      "promptChars": 4610,
+      "referenceBytes": 1570957,
+      "startedMs": 28034,
+      "status": 200,
+      "headersMs": 28612,
+      "bytes": 3632308,
+      "totalMs": 30030
+    },
+    {
+      "id": 4,
+      "endpoint": "/v1/images/edits",
+      "model": "gpt-image-2.5",
+      "promptChars": 4613,
+      "referenceBytes": 1570957,
+      "startedMs": 28036,
+      "status": 200,
+      "headersMs": 32656,
+      "bytes": 2798621,
+      "totalMs": 33885
+    }
+  ],
+  "progress": [
+    {
+      "atMs": 8,
+      "label": "生成主体参考图",
+      "detail": "先确定产品的部件形状、数量、位置、配色与装配状态"
+    },
+    {
+      "atMs": 28029,
+      "label": "依据主体图生成三个视图",
+      "detail": "前视图、俯视图、右视图并行使用同一张主体参考图，仅改变观察方向"
+    }
+  ],
+  "sourceHashes": {
+    "server/productWorkflowAi.ts": "b2201ffe959c8f7c25a194fbc45e4e2eef4e3c4a188e31c8b1bc57927969362e",
+    "server/productImages.ts": "446163ac585e37f29c05bfefc24e8f7c88b2a56decc943ab46500d6d8d653839",
+    "src/features/product/productPrompts.ts": "420770657cabfcad0621f53afd8020b4092ecda1041984eeb958fc15cce71f48"
+  },
+  "complete": true,
+  "elapsedMs": 61991,
+  "completedAt": "2026-10-13T03:52:03.902Z"
+}

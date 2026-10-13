@@ -1,0 +1,133 @@
+{
+  "startedAt": "2026-10-13T03:44:25.455Z",
+  "model": "gpt-6.1-sol",
+  "stages": [
+    {
+      "name": "brief-concise-prompt",
+      "outcome": "completed",
+      "elapsedMs": 84163
+    },
+    {
+      "name": "naming-product-options",
+      "outcome": "failed",
+      "error": {
+        "code": "AI_TIMEOUT",
+        "message": "名称生成超时，请稍后重试。",
+        "details": []
+      },
+      "elapsedMs": 109506
+    },
+    {
+      "name": "naming-structure-evidence",
+      "outcome": "failed",
+      "error": {
+        "code": "INVALID_INPUT",
+        "message": "请先确认具体产品、结构特征和改进类型。",
+        "details": []
+      },
+      "elapsedMs": 8
+    },
+    {
+      "name": "naming-names",
+      "outcome": "failed",
+      "error": {
+        "code": "INVALID_INPUT",
+        "message": "请确认具体的实体保护客体与实际形状、部件或连接特征。",
+        "details": []
+      },
+      "elapsedMs": 3
+    }
+  ],
+  "requests": [
+    {
+      "stage": "brief-concise-prompt",
+      "model": "gpt-6.1-sol",
+      "endpoint": "/v1/chat/completions",
+      "requestBytes": 4592,
+      "promptChars": 1281,
+      "outputChars": 3186,
+      "maxGapMs": 651,
+      "startedAt": "2026-10-13T03:44:25.463Z",
+      "status": 200,
+      "headersMs": 16640,
+      "firstByteMs": 16644,
+      "firstContentMs": 16645,
+      "finishReason": "stop",
+      "usage": {
+        "prompt_tokens": 5426,
+        "completion_tokens": 2339,
+        "total_tokens": 7765,
+        "completion_tokens_details": {
+          "reasoning_tokens": 173
+        }
+      },
+      "totalMs": 84151
+    },
+    {
+      "stage": "naming-product-options",
+      "model": "gpt-6.1-sol",
+      "endpoint": "/v1/chat/completions",
+      "requestBytes": 2103,
+      "promptChars": 660,
+      "outputChars": 418,
+      "maxGapMs": 386,
+      "startedAt": "2026-10-13T03:45:49.624Z",
+      "status": 200,
+      "headersMs": 7644,
+      "firstByteMs": 7645,
+      "firstContentMs": 7645,
+      "finishReason": "stop",
+      "usage": {
+        "prompt_tokens": 4817,
+        "completion_tokens": 306,
+        "total_tokens": 5123,
+        "completion_tokens_details": {
+          "reasoning_tokens": 55
+        }
+      },
+      "totalMs": 16257
+    },
+    {
+      "stage": "naming-product-options",
+      "model": "gpt-6-sol",
+      "endpoint": "/v1/chat/completions",
+      "requestBytes": 2101,
+      "promptChars": 660,
+      "outputChars": 833,
+      "maxGapMs": 385,
+      "startedAt": "2026-10-13T03:46:05.886Z",
+      "status": 200,
+      "headersMs": 8113,
+      "firstByteMs": 8114,
+      "firstContentMs": 8114,
+      "finishReason": "stop",
+      "usage": {
+        "prompt_tokens": 4740,
+        "completion_tokens": 489,
+        "total_tokens": 5229,
+        "prompt_tokens_details": {
+          "cached_tokens": 4480
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 58
+        }
+      },
+      "totalMs": 21223
+    },
+    {
+      "stage": "naming-product-options",
+      "model": "gpt-6-astra",
+      "endpoint": "/v1/chat/completions",
+      "requestBytes": 2103,
+      "promptChars": 660,
+      "outputChars": 0,
+      "maxGapMs": 0,
+      "startedAt": "2026-10-13T03:46:27.112Z",
+      "status": 200,
+      "headersMs": 1495,
+      "firstByteMs": 1495,
+      "firstContentMs": 1496
+    }
+  ],
+  "completedAt": "2026-10-13T03:47:39.146Z"
+}

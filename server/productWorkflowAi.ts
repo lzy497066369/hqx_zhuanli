@@ -51,7 +51,18 @@ export const PRODUCT_REVISION_PROMPT = `你是产品重画需求澄清助手。$
 export const PRODUCT_MATERIALS_PROMPT = `你是专利申请材料初稿撰写助手。${untrusted}
 仅基于用户已确认彩色预览对应的这一个产品简介撰写。它是唯一事实来源，保留部件名称、编号、装配关系、运动状态与改进点，不添加新部件、性能数据、实验或未经选择的新功能。待核实条件不得当作已验证数据。
 根据 patentType 撰写发明或实用新型产品专利初稿，实用新型不得将方法步骤写成独立保护主题。不要声称可直接提交或保证授权。
-输出 {"abstract":"约150至300字摘要","claims":["1. 一种……，其特征在于……","2. 根据权利要求1所述的……"],"technicalField":"技术领域正文","background":"客观背景与已有问题，不编造引证专利","content":"要解决的问题、完整技术方案及有依据的有益效果","drawings":"依据输入的图清单，只描述真实生成的图","embodiment":"详细实施方式，按部件、连接、使用过程完整说明"}。
+撰写风格参考用户提供的《纸板箱》定稿所体现的组织方式：权利要求简洁递进，说明书先概括方案、再按关联结构展开具体实施，效果说明紧扣结构与作用的因果关系。下面的句式仅作表达示范，方括号内容须替换为当前产品的真实资料，不能输出占位符。不得迁入参考专利的纸板箱、进气口、凸条、覆膜等技术内容、尺寸、部件数量、图号或权利要求数量。
+各字段按以下方式组织，正文用换行分段，不在字段内重复写章节标题、产品标题或整份申请书：
+1. abstract：约150至300字的一段文字，可用“本实用新型公开了一种[产品]，涉及[领域]，其技术方案要点是：包括[主体]……”起句。概括核心结构、关键配合关系及主要效果，不逐项罗列所有附属部件，不展开完整操作过程，不加附图标号。
+2. claims：独立权利要求采用“1. 一种[产品]，其特征在于：包括[主体]，所述……”等规范句式，完整限定解决核心问题所需的结构、位置和连接关系；不能为缩短篇幅删掉必要技术特征，也不把全部附属细节和效果解释塞进独立权利要求。从属权利要求采用“2. 根据权利要求1所述的[产品]，其特征在于：所述……”等句式，每条围绕一组关联的附加技术特征作简短限定。引用实际引入相关部件的前项权利要求，形成有依据的递进或分支；不机械地全部引用权利要求1，不原样重述被引用权利要求，不为凑条数拆出同义重复项。数量由已有可支持的技术特征决定，部件名后使用输入中对应的数字标号，如“[部件名称]（[标号]）”。
+3. technicalField：通常一句话，采用“本实用新型涉及[领域]，更具体地说，它涉及一种[产品]。”等简洁表述，不重复介绍结构、用途清单和有益效果。
+4. background：一至两段，按“现有使用场景或结构—具体不足及原因—需要解决的问题”展开，客观叙述输入支持的背景，不提前介绍本方案的创新结构，不编造引证专利、检索结论或试验事实，不铺陈无关优点。
+5. content：先用“针对现有技术存在的不足，本实用新型的目的在于提供一种[产品]……”简述目的；再用“本实用新型的上述技术目的是通过以下技术方案得以实现的：……”概括独立权利要求对应的完整核心方案。然后按从属权利要求的特征顺序，将已有改进分成简短自然段，用“本实用新型进一步设置为：所述……”说明，每段只写该项结构限定，通常一至两句，不在每项后重复展开工作过程。最后单独用“综上所述，本实用新型具有以下有益效果：……”集中说明已有依据的主要效果，按“通过[结构配合]，使[作用发生]，从而[解决问题]”叙述，避免把同一效果换词反复罗列。此字段通常不加附图标号。
+6. drawings：仅按输入的真实图清单逐行写“图1为本实用新型的[实际视图名称]。”等简短说明，再列附图标记；不得把参考专利的两张图当作当前产品的图清单。
+7. embodiment：以“下面结合附图和实施例，对本实用新型进行详细描述。”起句；接着用“实施例：一种[产品]，如图[实际图号]所示……”引入。围绕主体及相互配合的结构分组分段，按“结构与连接—具体为[输入已有的形状、位置、连接或配合细节]—产生的作用”展开。相关部件放在同一组说明，不机械地每个部件单独写一段；使用一致的部件名称及数字标号，明确关键相对位置、连接和运动约束。只展开简介已给出的具体细节，不为模仿定稿补造尺寸、材料、工艺或替代结构；必要的使用顺序在最后用简洁的一段连贯说明，复杂工况可分段。收尾可简短说明实施例仅用于解释，保护范围以权利要求为准，不使用“所有同类方案均受保护”等扩大保护范围的断言。
+章节之间允许为支持权利要求而重述相同技术特征：content 是方案概括，embodiment 是具体实现和工作配合，abstract 是摘要；不能为了去重删掉必要限定，也不能把 content 整段换几个词后再次作为 embodiment。实施方式重述特征时应结合已有具体实现、配合或使用情形说明；同一字段内不重复插入相同段落，不把同一工作原理在部件介绍、状态介绍、使用过程和结论中完整讲述多遍。句式规范、直接、连贯，避免宣传词和冗长的教学式解释。输出前自行核对每条权利要求均有说明书支持，部件名称、标号、引用、图号及运动状态一致，合并同一字段中无新增信息的重复句段。
+上述“本实用新型”用于 utility；patentType 为 invention 时对应改用“本发明”，保持产品专利主题与实际技术特征。
+输出 {"abstract":"约150至300字摘要","claims":["1. 一种……，其特征在于：……","2. 根据权利要求1所述的……，其特征在于：……"],"technicalField":"技术领域正文","background":"客观背景与已有问题","content":"目的、核心方案、进一步设置及集中说明的有益效果","drawings":"真实图清单对应的简短说明","embodiment":"按关联结构分组的具体实施与必要使用过程"}。
 权利要求从1连续编号，每条前置1.等数字编号；从属权利要求只能引用前面的权利要求。不照抄简介中的创作指令，不出现待补充占位文字。说明书正文必须完整而非目录。附图清单只有一张时绝不能引用图2、图3。只能使用简介中真实存在的部件数字标号。`;
 
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -158,13 +169,14 @@ export function createProductWorkflowService(config: AiConfig, fetcher: typeof f
     while (imageCache.size > 16 || (imageCache.size > 1 && [...imageCache.values()].reduce((sum, value) => sum + value.dataUrl.length, 0) > 96 * 1024 * 1024)) imageCache.delete(imageCache.keys().next().value!);
   };
   /** 每个视角只发一次上游生图请求；成功的视角缓存后，重试只补缺失视角。 */
-  const generateView = async (brief: ProductBrief, templateId: string, signal: AbortSignal) => {
-    const key = `${brief.id}:${templateId}`;
+  const generateView = async (brief: ProductBrief, templateId: string, signal: AbortSignal, reference?: ProductImage) => {
+    // 派生图缓存绑定主体图内容，主体图因缓存淘汰而重生成时不能混用旧视图。
+    const key = `${brief.id}:${templateId}${reference ? `:${reference.digest}` : ''}`;
     if (imageCache.has(key)) return imageCache.get(key)!;
     if (pending.has(key)) throw new AiFailure(409, 'PRODUCT_REQUEST_RUNNING', '同一版本的图片正在生成，请等待完成，勿重复提交。');
     pending.add(key);
     try {
-      const image = await generateProductImage(brief, 'preview', templateId, config, signal, fetcher);
+      const image = await generateProductImage(brief, 'preview', templateId, config, signal, fetcher, reference);
       cacheImage(key, image);
       return image;
     } finally { pending.delete(key); }
@@ -214,17 +226,20 @@ export function createProductWorkflowService(config: AiConfig, fetcher: typeof f
       const key = `${brief.id}:preview-set`;
       if (pending.has(key)) throw new AiFailure(409, 'PRODUCT_REQUEST_RUNNING', '同一版本的彩色预览正在生成，请等待完成，勿重复提交。');
       pending.add(key);
-      progress?.('并行生成四张彩色预览', '主体图、前视图、俯视图、右视图各提交一次生图请求');
+      progress?.('生成主体参考图', '先确定产品的部件形状、数量、位置、配色与装配状态');
       try {
-        const settled = await Promise.allSettled(PREVIEW_VIEWS.map(view => generateView(brief, view.templateId, signal)));
+        const hero = await generateView(brief, 'color-hero', signal);
+        signal.throwIfAborted();
+        progress?.('依据主体图生成三个视图', '前视图、俯视图、右视图并行使用同一张主体参考图，仅改变观察方向');
+        const settled = await Promise.allSettled(PREVIEW_VIEWS.filter(view => view.id !== 'hero').map(view => generateView(brief, view.templateId, signal, hero)));
         const failures = settled.filter((item): item is PromiseRejectedResult => item.status === 'rejected');
         if (failures.length) {
           const first = failures[0].reason;
-          const done = settled.length - failures.length;
+          const done = 1 + settled.length - failures.length;
           if (first instanceof AiFailure) throw new AiFailure(first.status, first.code, `${first.message}（${done} 张视图已生成并保留，重试只补齐缺失视图）`, first.details);
           throw first;
         }
-        const images = settled.map(item => (item as PromiseFulfilledResult<ProductImage>).value);
+        const images = [hero, ...settled.map(item => (item as PromiseFulfilledResult<ProductImage>).value)];
         const digest = createHash('sha256').update(images.map(image => `${image.templateId}:${image.digest}`).join('\n')).digest('hex');
         const reference = signProductArtifact('preview', { id: randomUUID(), briefId: brief.id, viewIds: PREVIEW_VIEWS.map(view => view.id), digest, createdAt: new Date().toISOString() }, config);
         const preview: ProductPreview = { ...reference, images };

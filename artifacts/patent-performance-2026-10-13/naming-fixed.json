@@ -1,0 +1,96 @@
+{
+  "startedAt": "2026-10-13T03:49:44.400Z",
+  "model": "gpt-6.1-sol",
+  "stages": [
+    {
+      "name": "naming-product-options",
+      "outcome": "completed",
+      "elapsedMs": 19344
+    },
+    {
+      "name": "naming-structure-evidence",
+      "outcome": "completed",
+      "elapsedMs": 31049
+    },
+    {
+      "name": "naming-names",
+      "outcome": "completed",
+      "elapsedMs": 11637
+    }
+  ],
+  "requests": [
+    {
+      "stage": "naming-product-options",
+      "model": "gpt-6.1-sol",
+      "endpoint": "/v1/chat/completions",
+      "requestBytes": 2103,
+      "promptChars": 660,
+      "outputChars": 454,
+      "maxGapMs": 525,
+      "startedAt": "2026-10-13T03:49:44.413Z",
+      "status": 200,
+      "headersMs": 9759,
+      "firstByteMs": 9762,
+      "firstContentMs": 9762,
+      "finishReason": "stop",
+      "usage": {
+        "prompt_tokens": 4817,
+        "completion_tokens": 373,
+        "total_tokens": 5190,
+        "completion_tokens_details": {
+          "reasoning_tokens": 79
+        }
+      },
+      "totalMs": 19327
+    },
+    {
+      "stage": "naming-structure-evidence",
+      "model": "gpt-6.1-sol",
+      "endpoint": "/v1/chat/completions",
+      "requestBytes": 2023,
+      "promptChars": 676,
+      "outputChars": 1401,
+      "maxGapMs": 2814,
+      "startedAt": "2026-10-13T03:50:03.749Z",
+      "status": 200,
+      "headersMs": 4713,
+      "firstByteMs": 4713,
+      "firstContentMs": 4715,
+      "finishReason": "stop",
+      "usage": {
+        "prompt_tokens": 4755,
+        "completion_tokens": 799,
+        "total_tokens": 5554,
+        "completion_tokens_details": {
+          "reasoning_tokens": 43
+        }
+      },
+      "totalMs": 31043
+    },
+    {
+      "stage": "naming-names",
+      "model": "gpt-6.1-sol",
+      "endpoint": "/v1/chat/completions",
+      "requestBytes": 3011,
+      "promptChars": 485,
+      "outputChars": 114,
+      "maxGapMs": 221,
+      "startedAt": "2026-10-13T03:50:34.800Z",
+      "status": 200,
+      "headersMs": 9967,
+      "firstByteMs": 9967,
+      "firstContentMs": 9967,
+      "finishReason": "stop",
+      "usage": {
+        "prompt_tokens": 4971,
+        "completion_tokens": 228,
+        "total_tokens": 5199,
+        "completion_tokens_details": {
+          "reasoning_tokens": 137
+        }
+      },
+      "totalMs": 11631
+    }
+  ],
+  "completedAt": "2026-10-13T03:50:46.436Z"
+}

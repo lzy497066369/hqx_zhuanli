@@ -549,11 +549,6 @@ function UtilityNamingForm({
                   </span>
                 </span>
                 <h3>让名称，准确表达你的技术</h3>
-                <p>
-                  产品名称提供方向，实际结构决定主题。
-                  <br />
-                  不堆砌效果词，不编造创新点。
-                </p>
                 <div className="un-formula">
                   <span>一种</span>
                   <b>＋</b>

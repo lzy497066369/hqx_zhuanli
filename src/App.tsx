@@ -43,6 +43,7 @@ import { newId } from "./storage/id";
 import { Illustration } from "./components/Illustration";
 import { UtilityNaming } from "./features/utility/UtilityNaming";
 import { ProductWorkflowWorkspace } from './features/product/ProductWorkflowWorkspace';
+import { ProjectGenerationProgress } from './features/product/ProjectGenerationProgress';
 import { createProductWorkflow, isProductWorkflowComplete, namingFingerprint } from './features/product/productWorkflow';
 import type { ProductWorkflow } from './features/product/productWorkflow';
 import { createProductWordBlob, productWordFilename } from './features/product/productWordExport';
@@ -91,6 +92,17 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
   const inventionProject = projects.find(p => p.category === 'invention' && p.id === location.hash.split('/')[1]);
   const [inventionStage, setInventionStage] = useState<"naming" | "workspace">("naming");
   const [utilityStage, setUtilityStage] = useState<"naming" | "workspace">("naming");
+  const [workflowSessions, setWorkflowSessions] = useState<string[]>([]);
+  const activeWorkflowProject = page === 'utility' && utilityStage === 'workspace' ? utilityProject
+    : page === 'invention' && inventionStage === 'workspace' ? inventionProject : undefined;
+  const sessionKey = (project: Project) => `${project.id}:${namingFingerprint(project)}`;
+  const activeSession = activeWorkflowProject && (activeWorkflowProject.category === 'utility' || activeWorkflowProject.naming) ? sessionKey(activeWorkflowProject) : undefined;
+  useEffect(() => {
+    if (activeSession) {
+      // oxlint-disable-next-line react/set-state-in-effect -- Keep visited project sessions alive across navigation.
+      setWorkflowSessions(current => current.includes(activeSession) ? current : [...current, activeSession]);
+    }
+  }, [activeSession]);
   const [editor, setEditor] = useState<Partial<Project> | null>(null);
   const [selectedCategory, setSelectedCategory] =
     useState<CategoryId>("invention");
@@ -106,6 +118,11 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
     let cancelled = false;
     Promise.all([loadProjectsAsync(), loadMaterialsAsync(), getStorageDriver()]).then(([list, files, mode]) => {
       if (cancelled) return;
+      // Requests belong to this browser session; a reload cannot leave a stale running badge.
+      list = list.map(project => project.productWorkflow?.generation?.state === 'running' ? {
+        ...project, productWorkflow: { ...project.productWorkflow, generation: { ...project.productWorkflow.generation,
+          state: 'cancelled' as const, label: '生成已中断', detail: '页面已重新加载，本次生成已中断。已有成果保留，请进入项目继续。', updatedAt: new Date().toISOString() } },
+      } : project);
       setProjects(list);
       setMaterials(files);
       setStorageMode(mode);
@@ -140,7 +157,7 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
       }
       if (next === "invention") {
         const id = location.hash.split("/")[1];
-        if (!id || id !== inventionProject?.id) setInventionStage("naming");
+        if (!id || id !== inventionProject?.id) setInventionStage(projects.find(project => project.id === id)?.productWorkflow ? 'workspace' : 'naming');
       }
       setMobileNav(false);
       mainRef.current?.focus();
@@ -264,6 +281,16 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
     };
     setProjects(list => list.map(apply));
     setUtilityProject(current => current ? apply(current) : current);
+    setPreview(current => current ? apply(current) : current);
+  };
+  const openProject = (project: Project) => {
+    if (project.productWorkflow && (project.category === 'utility' || project.category === 'invention')) {
+      if (project.category === 'utility') { setUtilityProject(project); setUtilityStage('workspace'); }
+      else setInventionStage('workspace');
+      // oxlint-disable-next-line react/immutability -- Hash navigation updates the browser route.
+      location.hash = `${project.category}/${project.id}`;
+      setPreview(null);
+    } else setPreview(project);
   };
   const saveProject = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -422,7 +449,7 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
                   <td>
                     <button
                       className="project-name"
-                      onClick={() => setPreview(p)}
+                      onClick={() => openProject(p)}
                     >
                       <span className={`file-icon ${c.color}`}>
                         <Icon size={19} />
@@ -432,6 +459,7 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
                         {p.demo && <small>示例项目</small>}
                       </span>
                     </button>
+                    <ProjectGenerationProgress project={p} />
                   </td>
                   <td>
                     <span className="type-label">{c.name}</span>
@@ -650,22 +678,23 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
           </div>
         </header>
         <main id="main" ref={mainRef} tabIndex={-1}>
+          {projects.filter(project => workflowSessions.includes(sessionKey(project)) || sessionKey(project) === activeSession).map(project => {
+            const visible = sessionKey(project) === activeSession;
+            return <div key={sessionKey(project)} className="project-session" hidden={!visible}>
+              <ProductWorkflowWorkspace project={project} visible={visible} onSave={saveProductWorkflow}
+                onBack={() => project.category === 'utility' ? setUtilityStage('naming') : setInventionStage('naming')} />
+            </div>;
+          })}
           {page === 'invention' && inventionProject ? (
             inventionStage === "workspace" && inventionProject.naming ? (
-              <ProductWorkflowWorkspace key={inventionProject.id} project={inventionProject}
-                onSave={saveProductWorkflow} onBack={() => setInventionStage("naming")} />
+              null
             ) : (
               <UtilityNaming key={inventionProject.id} project={inventionProject} patentType="invention"
                 onSave={saveInventionName} onOpenWorkspace={() => setInventionStage("workspace")} onBack={() => navigate("dashboard")} />
             )
           ) : page === "utility" ? (
             utilityStage === "workspace" && utilityProject ? (
-              <ProductWorkflowWorkspace
-                key={utilityProject.id}
-                project={utilityProject}
-                onSave={saveProductWorkflow}
-                onBack={() => setUtilityStage("naming")}
-              />
+              null
             ) : (
               <UtilityNaming
                 key={utilityProject?.id || "new-utility"}
@@ -801,7 +830,7 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
                   <h1>{pages[page]}</h1>
                   <p>
                     {page === "projects"
-                      ? "管理每一份创意，让创新成果井然有序。"
+                      ? "实时查看专利生成进度，点击项目继续确认预览或查看成果。"
                       : page === "materials"
                         ? "整理你的参考文件，为下一次创作做好准备。"
                         : "从结构化模板开始，告别面对空白页的犹豫。"}
@@ -1107,6 +1136,7 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
               更新于 {new Date(preview.updatedAt).toLocaleString("zh-CN")}
             </p>
           </div>
+          <ProjectGenerationProgress project={preview} />
           {preview.productWorkflow
             ? isProductWorkflowComplete(preview.productWorkflow) && preview.productWorkflow.sourceFingerprint === namingFingerprint(preview)
               ? <pre className="document-preview">{makeDocument(preview)}</pre>

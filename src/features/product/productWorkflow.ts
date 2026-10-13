@@ -37,7 +37,7 @@ export type ProductImageRef = {
   mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; digest: string; createdAt: string; signature: string;
 };
 export type ProductImage = ProductImageRef & { dataUrl: string; prompt: string; model: string };
-// 彩色预览由四条并行生图请求产出，每个视角一张图；附图登记表与视角定义集中在 productPrompts.ts。
+// 彩色预览先生成主体图，再以它为参考并行生成三个视图；视角定义集中在 productPrompts.ts。
 export { PREVIEW_VIEWS, CAD_VIEWS, FIGURE_CATALOG } from './productPrompts.ts';
 export type { CadViewId } from './productPrompts.ts';
 export type ProductPreviewRef = {
@@ -69,11 +69,21 @@ export type RevisionInput = { text: string; directions: string[]; answers: { que
 export type RevisionResponse =
   | { status: 'needs_information'; dialogue: RevisionDialogue }
   | { status: 'ready'; selection: ProductSelection; summary: string };
+export type ProductGenerationStatus = {
+  state: 'running' | 'completed' | 'failed' | 'cancelled';
+  label: string;
+  detail: string;
+  steps: { label: string; detail: string }[];
+  startedAt: string;
+  updatedAt: string;
+  error?: string;
+};
 export type ProductWorkflow = {
   version: 2; sourceFingerprint: string; selection: ProductSelection; review?: ProductReview;
   brief?: ProductBrief; previews?: ProductPreview; cad?: ProductCad; confirmation?: PreviewConfirmation;
   materials?: ProductMaterials; figures: Record<string, ProductImage>; revision?: RevisionDialogue;
   previous?: ProductWorkflow;
+  generation?: ProductGenerationStatus;
   /** 旧版单张三视图预览；仅为保留历史数据，不能用于确认或生成成品。 */
   preview?: ProductImage;
   redrawCount: number; updatedAt: string;
@@ -272,13 +282,20 @@ export function createProductWorkflow(project: Project): ProductWorkflow {
 export function isProductWorkflow(value: unknown): value is ProductWorkflow {
   if (!object(value) || value.version !== 2 || !productText(value.sourceFingerprint, 200000) || !isProductSelection(value.selection) || !timestamp(value.updatedAt) ||
     !Number.isSafeInteger(value.redrawCount) || (value.redrawCount as number) < 0 || !object(value.figures) || Object.keys(value.figures).length > 12) return false;
-  return (value.review === undefined || isProductReview(value.review)) && (value.brief === undefined || isProductBrief(value.brief)) &&
+  return (value.generation === undefined || isProductGenerationStatus(value.generation)) &&
+    (value.review === undefined || isProductReview(value.review)) && (value.brief === undefined || isProductBrief(value.brief)) &&
     (value.previews === undefined || isProductPreview(value.previews)) && (value.cad === undefined || isProductCad(value.cad)) &&
     (value.preview === undefined || isProductImage(value.preview)) &&
     (value.confirmation === undefined || isPreviewConfirmation(value.confirmation)) &&
     (value.materials === undefined || isProductMaterials(value.materials)) && Object.values(value.figures).every(isProductImage) &&
     (value.revision === undefined || isRevisionDialogue(value.revision)) &&
     (value.previous === undefined || (object(value.previous) && value.previous.previous === undefined && isProductWorkflow(value.previous)));
+}
+export function isProductGenerationStatus(value: unknown): value is ProductGenerationStatus {
+  return object(value) && ['running', 'completed', 'failed', 'cancelled'].includes(String(value.state)) &&
+    productText(value.label, 4000) && productText(value.detail, 10000, true) && timestamp(value.startedAt) && timestamp(value.updatedAt) &&
+    (value.error === undefined || productText(value.error, 10000)) && Array.isArray(value.steps) && value.steps.length <= 6 &&
+    value.steps.every(step => object(step) && productText(step.label, 4000) && productText(step.detail, 10000, true));
 }
 export function hasCurrentPreview(workflow: ProductWorkflow): boolean {
   return !!workflow.brief && !!workflow.review && workflow.review.verdict === 'feasible' && workflow.brief.reviewId === workflow.review.id &&

@@ -44,7 +44,8 @@ const namesPrompt = `你是实用新型名称助手。用户已确认保护客�
 const namesRepairPrompt = `你是实用新型名称修复助手。product 和 features 均为已确认内容，不得改写。将草稿改成简洁产品名：以“一种”开头、以完整 product 结尾，通常完整包含至少一个已选 feature，优先只用一项；若 product 比 productName 更具体，可有一个名称只写“一种{product}”。不能写序号、标点、“其…”等说明句或擅自添加事实。优先25字以内，最多40字，不重复 previous 或 blockedNames。生成5至6个不同名称，至少3个合格。只返回纯JSON：{"names":["一种..."]}。`;
 
 function keepsProductSubject(product: string, business: string) {
-  return keepsProtectedSubject(product, business) && !isAccessorySubject(product);
+  // 配件判断必须相对用户客体：用户本身选择安装支架时，支架就是完整产品。
+  return keepsProtectedSubject(product, business) && (!isAccessorySubject(product) || isAccessorySubject(business));
 }
 
 function validOptions(value: unknown, profile: CompanyProfile, previous: string[]): Option[] {

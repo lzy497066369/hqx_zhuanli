@@ -139,7 +139,7 @@ export function checkProduct(product: string): string[] {
 export function isStructuralFeature(feature: string): boolean {
   const value = feature.trim();
   return !!value && !placeholder.test(value) && !nonProduct.test(value) && !promotional.some(term => value.includes(term)) &&
-    /型|形|截面|弧|孔|槽|齿|螺|卡|铰|轴|轨|梁|杆|框|板|片|层|纹|管|筒|轮|爪|臂|弹簧|密封|连接|固定|限位|支撑|定位|开合|折叠|排布|布置|结构|组件|机构|外壳|壳体/u.test(value) &&
+    /型|形|截面|弧|孔|槽|齿|螺|卡|铰|轴|轨|梁|杆|框|板|片|层|纹|管|筒|轮|爪|臂|挡边|弹簧|密封|连接|固定|限位|支撑|定位|开合|折叠|排布|布置|结构|组件|机构|外壳|壳体/u.test(value) &&
     !/^(?:可拆卸|可调节|耐腐蚀|耐磨|稳定|轻便|灵活|高强度|高性能)$/u.test(value);
 }
 const splitTerms = (text: string) =>

@@ -16,7 +16,7 @@ try { requests = JSON.parse(await fs.readFile(path.join(root, 'live-request-summ
 if (!Array.isArray(requests)) requests = [];
 const initialRequestCount = requests.length;
 const fetcher = async (url, init) => {
-  const payload = JSON.parse(init?.body || '{}');
+  const payload = init?.body instanceof FormData ? Object.fromEntries(init.body.entries()) : JSON.parse(init?.body || '{}');
   const entry = { kind: String(url).includes('/images/') ? 'image' : 'text', model: payload.model, startedAt: new Date().toISOString() };
   requests.push(entry);
   const response = await fetch(url, init); entry.status = response.status;

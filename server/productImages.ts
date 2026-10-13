@@ -69,16 +69,37 @@ export function checkImageConfig(config: AiConfig): void {
   }
 }
 /** Exactly one billable generation call. A user-visible retry is required after an ambiguous failure. */
-export async function generateProductImage(brief: ProductBrief, kind: 'preview' | 'patent', templateId: string, config: AiConfig, signal: AbortSignal, fetcher: typeof fetch = fetch): Promise<ProductImage> {
+export async function generateProductImage(brief: ProductBrief, kind: 'preview' | 'patent', templateId: string, config: AiConfig, signal: AbortSignal, fetcher: typeof fetch = fetch, reference?: ProductImage): Promise<ProductImage> {
   checkImageConfig(config);
+  const needsReference = kind === 'preview' && templateId !== 'color-hero';
+  if (needsReference && (!reference || reference.briefId !== brief.id || reference.kind !== 'preview' || reference.templateId !== 'color-hero')) {
+    throw new AiFailure(400, 'PREVIEW_REFERENCE_REQUIRED', '请先生成同一版本的主体图，再以主体图为参考生成其他视角。');
+  }
   const settings = config.image!;
   const timeout = AbortSignal.timeout(settings.timeoutMs ?? 210000);
   const combined = AbortSignal.any([signal, timeout]);
   const prompt = kind === 'preview' ? buildPreviewPrompt(brief, templateId) : buildPatentFigurePrompt(brief, templateId);
+  let body: string | FormData;
+  if (needsReference) {
+    const bytes = Buffer.from(reference!.dataUrl.split(',')[1] || '', 'base64');
+    if (bytes.length > MAX_IMAGE_BYTES || imageMime(bytes) !== reference!.mimeType || createHash('sha256').update(bytes).digest('hex') !== reference!.digest) {
+      throw new AiFailure(400, 'PREVIEW_REFERENCE_INVALID', '主体参考图内容无效，未提交其他视角的生图请求。');
+    }
+    const extension = reference!.mimeType === 'image/png' ? 'png' : reference!.mimeType === 'image/jpeg' ? 'jpg' : 'webp';
+    const form = new FormData();
+    form.set('model', settings.model);
+    form.set('prompt', prompt);
+    form.set('n', '1');
+    if (settings.size) form.set('size', settings.size);
+    form.set('image', new Blob([new Uint8Array(bytes)], { type: reference!.mimeType }), `product-hero.${extension}`);
+    body = form;
+  } else {
+    body = JSON.stringify({ model: settings.model, prompt, n: 1, ...(settings.size ? { size: settings.size } : {}) });
+  }
   try {
-    const response = await fetcher(`${settings.baseUrl}/images/generations`, { method: 'POST', redirect: 'error', signal: combined,
-      headers: { Authorization: `Bearer ${settings.apiKey}`, 'Content-Type': 'application/json', 'User-Agent': AI_USER_AGENT },
-      body: JSON.stringify({ model: settings.model, prompt, n: 1, ...(settings.size ? { size: settings.size } : {}) }),
+    const response = await fetcher(`${settings.baseUrl}/images/${needsReference ? 'edits' : 'generations'}`, { method: 'POST', redirect: 'error', signal: combined,
+      headers: { Authorization: `Bearer ${settings.apiKey}`, ...(!needsReference ? { 'Content-Type': 'application/json' } : {}), 'User-Agent': AI_USER_AGENT },
+      body,
     });
     if (!response.ok) {
       // Inspect only bounded diagnostics for known capability errors; never return raw provider text.
@@ -91,6 +112,7 @@ export async function generateProductImage(brief: ProductBrief, kind: 'preview' 
       if (response.status === 400 && /requires an image model/i.test(diagnostic)) throw new AiFailure(503, 'IMAGE_MODEL_UNSUPPORTED', '当前 AI_IMAGE_MODEL 不是图片接口支持的生图模型，请改为该分组已授权的图片模型。');
       if ([401, 403].includes(response.status)) throw new AiFailure(502, 'IMAGE_AUTH', '生图服务授权失败，请检查服务端生图密钥及模型权限。');
       if (response.status === 429) throw new AiFailure(429, 'IMAGE_RATE_LIMIT', '生图服务限流或额度不足，请检查额度后重试。');
+      if (needsReference) throw new AiFailure(502, 'IMAGE_REFERENCE_UPSTREAM', '主体图已保留，但参考图生图失败。请核对图片模型与服务商是否支持 images/edits 上传参考图片；未改用独立文字生图，也未自动重复提交。');
       throw new AiFailure(502, 'IMAGE_UPSTREAM', '生图调用失败，请核对模型是否支持 images/generations 接口。未自动重复扣费请求。');
     }
     let payload: { data?: { b64_json?: unknown; url?: unknown }[] };

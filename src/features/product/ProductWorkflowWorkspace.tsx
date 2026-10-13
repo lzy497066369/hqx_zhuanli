@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { ArrowLeft, Check, CheckCheck, CircleAlert, Cuboid, Download, FileText, Image, RotateCcw, ShieldCheck, Sparkles, X } from 'lucide-react';
 import type { Project } from '../../data';
 import { Modal } from '../../components/Modal';
@@ -25,9 +25,10 @@ const redrawDirections = [
 ];
 type Task = { controller: AbortController; signal: AbortSignal; generationToken?: string };
 
-export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
-  project: Project; onSave: (projectId: string, workflow: ProductWorkflow) => void; onBack: () => void;
+export function ProductWorkflowWorkspace({ project, onSave, onBack, visible = true }: {
+  project: Project; onSave: (projectId: string, workflow: ProductWorkflow) => void; onBack: () => void; visible?: boolean;
 }) {
+  const formId = useId();
   const workspaceScope = useRef(workspaceHeaders()).current;
   const [workflow, setWorkflow] = useState<ProductWorkflow>(() => project.productWorkflow?.sourceFingerprint === namingFingerprint(project)
     ? project.productWorkflow : createProductWorkflow(project));
@@ -38,7 +39,7 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
   const generationRef = useRef<{ token: string; timer: ReturnType<typeof setInterval> } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressStep[]>([]);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(workflow.generation?.error || '');
   const [notice, setNotice] = useState('');
   const [resolutions, setResolutions] = useState<Record<string, string>>({});
   const [redrawOpen, setRedrawOpen] = useState(false);
@@ -63,6 +64,16 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
     saveRef.current(project.id, next);
     return next;
   };
+  const updateGeneration = (state: 'running' | 'completed' | 'failed' | 'cancelled', label: string, detail: string, steps: ProgressStep[], error?: string) => {
+    const now = new Date().toISOString();
+    save({ generation: { state, label, detail, steps, error, startedAt: stateRef.current.generation?.startedAt || now, updatedAt: now } });
+  };
+  const reportProgress = (task: Task, step: ProgressStep) => {
+    if (taskRef.current !== task || task.signal.aborted) return;
+    const steps = [...(stateRef.current.generation?.steps || []).slice(-5), step];
+    setProgress(steps);
+    updateGeneration('running', step.label, step.detail, steps);
+  };
   const assertActive = (task: Task) => {
     task.signal.throwIfAborted();
     if (taskRef.current !== task) throw new DOMException('结果已经过期', 'AbortError');
@@ -78,9 +89,7 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
   async function reserveGeneration(task: Task) {
     if (generationRef.current) { task.generationToken = generationRef.current.token; return generationRef.current.token; }
     // Queue waiting has no model timeout; explicit cancellation removes the waiter.
-    const response = await progressRequest<{ token: string }>('/api/generation/begin', {}, step => {
-      if (taskRef.current === task) setProgress(steps => [...steps.slice(-5), step]);
-    }, task.signal);
+    const response = await progressRequest<{ token: string }>('/api/generation/begin', {}, step => reportProgress(task, step), task.signal);
     const token = response.data.token;
     if (typeof token !== 'string' || !token) throw new Error('无法取得专利生成名额，请重试。');
     try { assertActive(task); } catch (cause) {
@@ -90,7 +99,11 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
     task.generationToken = token;
     const timer = setInterval(() => {
       void fetch('/api/generation/heartbeat', { method: 'POST', headers: { ...workspaceScope, 'Content-Type': 'application/json', 'X-Generation-Token': token }, body: '{}' })
-        .then(response => { if (!response.ok && generationRef.current?.token === token) { taskRef.current?.controller.abort(); releaseGeneration(); setBusy(null); setError('本次生成名额已失效，请重新开始并排队。'); } })
+        .then(response => { if (!response.ok && generationRef.current?.token === token) {
+          taskRef.current?.controller.abort(); releaseGeneration(); setBusy(null);
+          const message = '本次生成名额已失效，请重新开始并排队。';
+          setError(message); updateGeneration('failed', '生成失败', message, stateRef.current.generation?.steps || [], message);
+        } })
         .catch(() => {});
     }, 30000);
     generationRef.current = { token, timer };
@@ -99,11 +112,12 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
   async function call<T>(stage: string, body: unknown, task: Task, waitMs = TEXT_WAIT_MS): Promise<T> {
     assertActive(task);
     const token = await reserveGeneration(task);
+    const stages: Record<string, string> = { review: '逻辑校验', brief: '生成产品简介', preview: '生成四张彩色预览', confirm: '确认预览', cad: '生成模型与专利附图', figure: '生成黑白结构图', materials: '生成申请文案', revise: '理解重画意见' };
+    reportProgress(task, { label: stages[stage] || stage, detail: '正在处理，请稍候' });
     // 客户端等待必须长于服务端总预算（server/productWorkflowAi.ts 文本 600 秒、CAD 阶段另计），
     // 否则服务端还在生成时浏览器先中断，用户看不到服务端返回的具体原因。
-    const response = await progressRequest<T>(PATH + stage, body, step => {
-      if (taskRef.current === task && !task.signal.aborted) setProgress(steps => [...steps.slice(-5), step]);
-    }, AbortSignal.any([task.signal, AbortSignal.timeout(waitMs)]), { 'X-Generation-Token': token });
+    const response = await progressRequest<T>(PATH + stage, body, step => reportProgress(task, step),
+      AbortSignal.any([task.signal, AbortSignal.timeout(waitMs)]), { 'X-Generation-Token': token });
     assertActive(task);
     return response.data;
   }
@@ -113,14 +127,22 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
     const task: Task = { controller, signal: controller.signal };
     taskRef.current = task;
     setBusy(label); setError(''); setNotice(''); setProgress([{ label, detail: '正在连接服务，请稍候' }]);
-    try { await operation(task); }
+    const now = new Date().toISOString();
+    save({ generation: { state: 'running', label, detail: '正在连接服务，请稍候', steps: [{ label, detail: '正在连接服务，请稍候' }], startedAt: now, updatedAt: now } });
+    try {
+      await operation(task);
+      assertActive(task);
+      updateGeneration('completed', label, '本轮生成已完成', stateRef.current.generation?.steps || []);
+    }
     catch (cause) {
       if (task.generationToken) releaseGeneration(task.generationToken);
       if (!task.signal.aborted && taskRef.current === task) {
         // 服务端附带的具体原因（如模型输出未通过校验的条目）一并展示，便于判断是重试还是改选择。
         const details = (cause as { details?: unknown })?.details;
         const suffix = Array.isArray(details) && details.length ? `（${details.filter(item => typeof item === 'string').slice(0, 4).join('；')}）` : '';
-        setError((cause instanceof Error ? cause.message : '生成失败，请重试。') + suffix);
+        const message = (cause instanceof Error ? cause.message : '生成失败，请重试。') + suffix;
+        setError(message);
+        updateGeneration('failed', '生成失败', message, stateRef.current.generation?.steps || [], message);
       }
     } finally {
       if (taskRef.current === task) { taskRef.current = null; setBusy(null); }
@@ -129,6 +151,7 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
   const cancel = () => {
     taskRef.current?.controller.abort(); taskRef.current = null; setBusy(null);
     releaseGeneration();
+    updateGeneration('cancelled', '已停止', '已停止本次生成，已有成果保留，可进入项目继续。', stateRef.current.generation?.steps || []);
     setNotice('已停止等待本次生成，已有结果仍保留。生图服务或 FreeCAD 可能已开始处理，系统不会自动重复提交。');
   };
   async function finishPreview(task: Task, review: ProductReview) {
@@ -237,7 +260,7 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
     // Preserve the number of attempted redraws; there is no maximum.
     save({ ...previous, review: previous.review, brief: previous.brief, previews: previous.previews, preview: previous.preview,
       cad: previous.cad, confirmation: previous.confirmation, materials: previous.materials, figures: previous.figures,
-      revision: undefined, previous: undefined, redrawCount: stateRef.current.redrawCount });
+      revision: undefined, previous: undefined, generation: undefined, redrawCount: stateRef.current.redrawCount });
     setLoadedViews([]); setError(''); setNotice('已恢复上一版产品简介和预览，未重新调用生图模型。');
   };
   const exportWord = async () => {
@@ -256,10 +279,9 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
   };
 
   useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
     // Defer initial work so React StrictMode's probe does not create a second billable request.
     const timer = setTimeout(() => {
-      if (project.productWorkflow?.sourceFingerprint === stateRef.current.sourceFingerprint && !stateRef.current.review && isProductSelection(stateRef.current.selection)) {
+      if (project.productWorkflow?.sourceFingerprint === stateRef.current.sourceFingerprint && !stateRef.current.review && !stateRef.current.generation && isProductSelection(stateRef.current.selection)) {
         saveRef.current(project.id, stateRef.current);
         void run('检查产品逻辑', task => reviewAndPreview(task, { selection: stateRef.current.selection }));
       }
@@ -270,28 +292,32 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- A keyed workspace owns exactly one project and resumes only on explicit retry after a failure.
   }, [project.id]);
 
+  useEffect(() => {
+    if (visible) window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [visible]);
+
   return <div className="product-workflow" data-testid="product-workflow">
-    <button className="un-back" onClick={onBack}><ArrowLeft size={16} />返回修改名称与特征</button>
+    <button className="un-back" onClick={() => { if (busy) cancel(); releaseGeneration(); onBack(); }}><ArrowLeft size={16} />返回修改名称与特征</button>
     <header className="pw-heading"><div><div className="un-eyebrow">PRODUCT STUDIO · {workflow.selection.patentType === 'invention' ? '发明专利' : '实用新型'}</div>
       <h1>{title}</h1></div></header>
     <ol className="pw-steps" aria-label="产品生成流程">{['逻辑校验与去矛盾', '详细产品简介', '四张彩色预览与重画', '确认并生成成品'].map((label, index) =>
       <li key={label} className={index < activeStep || complete ? 'done' : index === activeStep ? 'active' : ''} aria-current={index === activeStep ? 'step' : undefined}>
         <span>{index < activeStep || complete ? <Check size={16} /> : `0${index + 1}`}</span><strong>{label}</strong></li>)}</ol>
-    {busy && <div className="pw-progress"><GenerationProgress title={busy} label="产品生成" steps={progress} /><button className="button secondary" onClick={cancel}><X size={15} />停止等待</button></div>}
+    {busy && <div className="pw-progress"><GenerationProgress title={busy} label="产品生成" steps={progress} note="可以切换到项目管理查看实时进度，生成会继续。" /><button className="button secondary" onClick={cancel}><X size={15} />停止等待</button></div>}
     {error && <div className="pw-error" role="alert"><CircleAlert size={18} /><div><p>{error}</p>{!busy && workflow.review && <button className="pw-restore" onClick={restartFromReview}>从逻辑校验重新生成</button>}</div></div>}
     {notice && <p className="pw-notice" role="status">{notice}</p>}
     {!isProductSelection(workflow.selection) && <p className="pw-error" role="alert">当前项目缺少已选产品特征，请返回名称与特征页面补充后继续。</p>}
-    {conflictReview && <section className="pw-panel pw-conflicts" aria-labelledby="pw-conflicts-title"><div className="pw-section-head"><CircleAlert size={21} /><div><h2 id="pw-conflicts-title">请先消除这些产品矛盾</h2><p>{conflictReview.summary}</p></div></div>
+    {conflictReview && <section className="pw-panel pw-conflicts" aria-labelledby={`${formId}-conflicts-title`}><div className="pw-section-head"><CircleAlert size={21} /><div><h2 id={`${formId}-conflicts-title`}>请先消除这些产品矛盾</h2><p>{conflictReview.summary}</p></div></div>
       {conflictReview.conflicts.map(conflict => <fieldset key={conflict.id} disabled={!!busy}><legend>{conflict.title}</legend><p>{conflict.reason}</p>
         <div className="pw-options">{conflict.options.map(option => <label key={option.id} className={resolutions[conflict.id] === option.id ? 'selected' : ''}>
-          <input type="radio" name={`conflict-${conflict.id}`} value={option.id} checked={resolutions[conflict.id] === option.id} onChange={() => setResolutions(current => ({ ...current, [conflict.id]: option.id }))} />
+          <input type="radio" name={`${formId}-conflict-${conflict.id}`} value={option.id} checked={resolutions[conflict.id] === option.id} onChange={() => setResolutions(current => ({ ...current, [conflict.id]: option.id }))} />
           <span><strong>{option.label}</strong><small>{option.explanation}</small>
             {option.removeIds.map(id => <small className="pw-removal" key={id}>删除：{conflictReview.selection.choices.find(choice => choice.id === id)?.text}</small>)}
             {option.replacements.map(item => <small key={item.id}>改为：{item.text}</small>)}{option.proposedName && <small>名称同步为：{option.proposedName}</small>}</span></label>)}</div></fieldset>)}
       <button className="button primary" disabled={!!busy || conflictReview.conflicts.some(conflict => !resolutions[conflict.id])} onClick={resolveConflicts}><ShieldCheck size={16} />应用选择并重新校验</button>
       <p className="pw-muted">只应用你明确选择的删改；重新检查通过后，才会生成简介和图片。</p></section>}
     <div className="pw-layout"><div className="pw-main">
-      <section className="pw-panel" aria-labelledby="pw-preview-title"><div className="pw-section-head"><Image size={21} /><div><h2 id="pw-preview-title">彩色产品预览（4 张并行）</h2><p>主体图、前视图、俯视图、右视图同时生成，必须是同一产品的同一套结构</p></div><span className="pw-tag">{workflow.redrawCount ? `已重画 ${workflow.redrawCount} 次` : '初次预览'}</span></div>
+      <section className="pw-panel" aria-labelledby={`${formId}-preview-title`}><div className="pw-section-head"><Image size={21} /><div><h2 id={`${formId}-preview-title`}>彩色产品预览（4 张）</h2><p>先生成主体图，再依据主体图生成前视图、俯视图和右视图，保持同一套结构与配色</p></div><span className="pw-tag">{workflow.redrawCount ? `已重画 ${workflow.redrawCount} 次` : '初次预览'}</span></div>
         {hasPreview ? <><div className="pw-previews">{PREVIEW_VIEWS.map(view => {
           const image = workflow.previews!.images.find(item => item.templateId === view.templateId)!;
           const loadKey = `${workflow.previews!.id}:${view.id}`;
@@ -301,15 +327,13 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
         })}</div>
           <div className="pw-actions"><button className="button primary" disabled={!!busy || confirmed || !allViewsLoaded} onClick={confirmPreview}><CheckCheck size={17} />{confirmed ? '已确认此预览' : '确认预览并生成成品'}</button>
             <button className="button secondary" disabled={!!busy} onClick={() => setRedrawOpen(true)}><RotateCcw size={16} />{workflow.revision ? '继续补充重画意见' : '重新画'}</button></div>
-          <p className="pw-muted">必须四张都加载成功才能确认。不限制重画次数；若修改涉及结构，会重新进行逻辑检查。只有你确认的新版本才用于最终文档。</p>
-          {confirmed && !complete && !busy && <p className="pw-muted">确认后先由 FreeCAD 生成统一模型与专利附图，再按这份附图清单生成申请文案。若 FreeCAD 不可用，可改用 AI 黑白结构图。</p>}
           <div className="pw-actions">{PATENT_FIGURE_TEMPLATES.map(template => <button key={template.id} className="button secondary" disabled={!!busy || !confirmed || hasCurrentImageFigures(workflow, [template.id])} onClick={buildWithoutFreeCad}><FileText size={15} />改用 AI 黑白结构图</button>)}</div>
           {workflow.preview && <p className="pw-muted">已保留旧版单张三视图预览作对照，它不参与确认，也不会用于最终文档。</p>}</>
-          : <div className="pw-empty"><Sparkles size={34} /><strong>{conflictReview ? '消除矛盾后生成预览' : busy ? '正在并行生成四张产品预览' : '继续生成当前产品预览'}</strong><p>不会用占位图或旧版几何图冒充生图结果。</p>
+          : <div className="pw-empty"><Sparkles size={34} /><strong>{conflictReview ? '消除矛盾后生成预览' : busy ? '正在生成主体图及其三个视图' : '继续生成当前产品预览'}</strong><p>不会用占位图或旧版几何图冒充生图结果。</p>
             {!busy && !conflictReview && <button className="button primary" disabled={!isProductSelection(workflow.selection)} onClick={() => void run('继续生成产品预览', continuePreview)}>{workflow.review ? '继续生成预览' : '检查逻辑并生成预览'}</button>}</div>}
         {workflow.previous && <button className="pw-restore" disabled={!!busy} onClick={restorePrevious}><RotateCcw size={14} />放弃本次修改，恢复上一版预览</button>}
       </section>
-      <section className="pw-panel" aria-labelledby="pw-final-title"><div className="pw-section-head"><Cuboid size={21} /><div><h2 id="pw-final-title">最终文档与专利附图</h2><p>FreeCAD 统一模型投影出立体图与三视图，作为说明书附图写入 Word</p></div>{complete && <span className="pw-tag success">已完成</span>}</div>
+      <section className="pw-panel" aria-labelledby={`${formId}-final-title`}><div className="pw-section-head"><Cuboid size={21} /><div><h2 id={`${formId}-final-title`}>最终文档与专利附图</h2><p>FreeCAD 统一模型投影出立体图与三视图，作为说明书附图写入 Word</p></div>{complete && <span className="pw-tag success">已完成</span>}</div>
         {!confirmed ? <p className="pw-muted">请先确认彩色预览。在此之前不会生成 CAD 模型、文案或附图。</p> : <>
           <ul className="pw-deliverables"><li>{workflow.materials ? <Check size={16} /> : <FileText size={16} />}申请文案 {workflow.materials ? '已生成' : '待生成'}</li>
             {CAD_VIEWS.map(view => <li key={view.id}>{workflow.cad?.views.some(item => item.view === view.id) ? <Check size={16} /> : <Cuboid size={16} />}{view.title} {workflow.cad?.views.some(item => item.view === view.id) ? '已生成' : '待生成'}</li>)}
@@ -331,13 +355,13 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack }: {
     </div><aside className="pw-side">
       <section className="pw-panel"><h2>当前生效选择</h2><p className="pw-muted">{workflow.selection.company} · {workflow.selection.product}</p><ul className="pw-choices">{workflow.selection.choices.map(choice => <li key={choice.id}>{choice.text}</li>)}</ul>{workflow.selection.visualPreferences && <p className="pw-prose">绘图要求：{workflow.selection.visualPreferences}</p>}</section>
     </aside></div>
-    {redrawOpen && <Modal title="告诉我们这次想怎么改" wide onClose={() => { if (busy) cancel(); setRedrawOpen(false); }}>
+    {redrawOpen && visible && <Modal title="告诉我们这次想怎么改" wide onClose={() => { if (busy) cancel(); setRedrawOpen(false); }}>
       <div className="pw-revision"><p>可以只调整视觉，也可以修改产品结构。不设固定问答轮数，信息足够形成完整产品后就直接重画四张预览。</p>
         {workflow.revision && <div className="pw-revision-questions"><p><strong>{workflow.revision.summary}</strong></p>{workflow.revision.questions.map(question => <fieldset key={question.id} disabled={!!busy}><legend>{question.question}</legend>
-          {question.options.map(option => <label key={option}><input type="radio" name={`rev-${question.id}`} checked={answers[question.id] === option} onChange={() => setAnswers(current => ({ ...current, [question.id]: option }))} />{option}</label>)}
+          {question.options.map(option => <label key={option}><input type="radio" name={`${formId}-rev-${question.id}`} checked={answers[question.id] === option} onChange={() => setAnswers(current => ({ ...current, [question.id]: option }))} />{option}</label>)}
           <label>自己的答案<input aria-label={`${question.question}：自定义回答`} value={question.options.includes(answers[question.id]) ? '' : answers[question.id] || ''} onChange={event => setAnswers(current => ({ ...current, [question.id]: event.target.value }))} maxLength={2000} placeholder="也可以直接说明你希望如何处理" /></label></fieldset>)}</div>}
         <fieldset disabled={!!busy}><legend>重画方向（可多选）</legend><div className="pw-revision-directions">{redrawDirections.map(direction => <label key={direction}><input type="checkbox" checked={directions.includes(direction)} onChange={() => setDirections(current => current.includes(direction) ? current.filter(item => item !== direction) : [...current, direction])} />{direction}</label>)}</div></fieldset>
-        <label htmlFor="pw-revision-text">修改说明</label><textarea id="pw-revision-text" data-autofocus rows={4} value={redrawText} onChange={event => setRedrawText(event.target.value)} maxLength={4000} disabled={!!busy} placeholder="例如：保留滑轨和锁定结构，外壳改成圆角，主体用蓝色，并把锁扣结构画得更清楚。" />
+        <label htmlFor={`${formId}-revision-text`}>修改说明</label><textarea id={`${formId}-revision-text`} data-autofocus rows={4} value={redrawText} onChange={event => setRedrawText(event.target.value)} maxLength={4000} disabled={!!busy} placeholder="例如：保留滑轨和锁定结构，外壳改成圆角，主体用蓝色，并把锁扣结构画得更清楚。" />
         {error && <p className="pw-error" role="alert">{error}</p>}{busy && <p className="pw-muted" role="status">{progress.at(-1)?.detail || '正在理解修改意见…'}</p>}
         <div className="modal-actions"><button className="button secondary" onClick={() => { if (busy) cancel(); setRedrawOpen(false); }}>暂不修改</button>
           <button className="button primary" disabled={!!busy || (!redrawText.trim() && !directions.length && !Object.values(answers).some(text => text.trim())) || !!workflow.revision?.questions.some(question => !answers[question.id]?.trim())} onClick={submitRevision}><Sparkles size={16} />{busy ? '正在分析修改意见…' : workflow.revision ? '提交补充并继续' : '提交修改并重画'}</button></div>

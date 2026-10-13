@@ -12,7 +12,7 @@ import { mockNaming } from './fixtures/namingAi';
 async function seed(page: Page, workflow: ProductWorkflow = createProductWorkflow(productProject)) {
   await page.addInitScript(project => { localStorage.setItem('zhichuang-projects-v1', JSON.stringify([project])); }, { ...productProject, productWorkflow: workflow });
 }
-async function mockFlow(page: Page, options: { conflict?: boolean; briefProofFailures?: number; previewFailures?: number; materialFailures?: number; cadFailures?: number; clarificationRounds?: number; holdPreview?: Promise<void> } = {}) {
+async function mockFlow(page: Page, options: { conflict?: boolean; briefProofFailures?: number; previewFailures?: number; materialFailures?: number; cadFailures?: number; clarificationRounds?: number; holdPreview?: Promise<void>; holdCad?: Promise<void> } = {}) {
   const counts: Record<string, number> = {};
   const inputs: { stage: string; body: Record<string, unknown> }[] = [];
   await page.route('**/api/**', route => /^\/api\/(storage|auth)\//.test(new URL(route.request().url()).pathname) ? route.continue() : route.abort());
@@ -40,6 +40,7 @@ async function mockFlow(page: Page, options: { conflict?: boolean; briefProofFai
       result = makePreview(body.brief, `api-preview-${counts.preview}`);
     } else if (stage === 'confirm') result = signProductArtifact('confirmation', { briefId: body.brief.id, previewId: body.preview.id, previewDigest: body.preview.digest, confirmedAt: '2026-10-09T08:00:00.000Z' }, productConfig);
     else if (stage === 'cad') {
+      if (options.holdCad) await options.holdCad;
       if (counts.cad <= (options.cadFailures || 0)) { await route.fulfill({ status: 503, json: { error: { code: 'FREECAD_UNAVAILABLE', message: '测试：本机未找到 FreeCAD 命令行程序。' } } }); return; }
       result = makeCad(body.brief);
     }
@@ -56,6 +57,110 @@ async function mockFlow(page: Page, options: { conflict?: boolean; briefProofFai
   });
   return { counts, inputs };
 }
+
+for (const category of ['utility', 'invention'] as const) test(`${category} 切换项目管理后继续生成，进度更新且返回不重复请求`, async ({ page }, testInfo) => {
+  let release!: () => void;
+  const holdPreview = new Promise<void>(resolve => { release = resolve; });
+  const project = { ...productProject, category };
+  await page.addInitScript(project => localStorage.setItem('zhichuang-projects-v1', JSON.stringify([project])), {
+    ...project, productWorkflow: createProductWorkflow(project),
+  });
+  const mock = await mockFlow(page, { holdPreview });
+  await page.goto(`/#${category}/${project.id}`);
+  await expect.poll(() => mock.counts.preview).toBe(1);
+  await page.getByRole('link', { name: /项目管理/ }).click();
+  const progress = page.getByTestId('project-generation-progress');
+  await expect(progress).toContainText('生成四张彩色预览');
+  await expect(progress).toContainText('已完成 2/6 阶段');
+  expect(mock.counts['generation-end'] || 0).toBe(0);
+  // Reopening the same in-flight project must preserve its request and state.
+  await page.locator('.project-name').click();
+  await expect(page.getByTestId('product-workflow')).toBeVisible();
+  await page.getByRole('link', { name: /项目管理/ }).click();
+  release();
+  await expect(progress).toContainText('待确认彩色预览');
+  await expect(progress).toContainText('已完成 3/6 阶段');
+  expect(mock.counts).toMatchObject({ review: 1, brief: 1, preview: 1, 'generation-begin': 1 });
+  expect(mock.counts.confirm || 0).toBe(0);
+  await expect.poll(async () => (await storedWorkflow(page))?.generation?.state).toBe('completed');
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze();
+  expect(axe.violations).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath(`project-progress-${category}-mobile.png`), fullPage: true });
+  await page.reload();
+  await expect(progress).toContainText('待确认彩色预览');
+});
+
+test('确认后切换项目管理，附图与文案继续生成并显示完成', async ({ page }) => {
+  let release!: () => void;
+  const holdCad = new Promise<void>(resolve => { release = resolve; });
+  await seed(page, makeWorkflow(false)); const mock = await mockFlow(page, { holdCad }); await open(page);
+  await expect(confirmButton(page)).toBeEnabled(); await confirmButton(page).click();
+  await expect.poll(() => mock.counts.cad).toBe(1);
+  await page.getByRole('link', { name: /项目管理/ }).click();
+  const progress = page.getByTestId('project-generation-progress');
+  await expect(progress).toContainText('生成模型与专利附图');
+  await expect(progress).toContainText('已完成 4/6 阶段');
+  release();
+  await expect(progress).toContainText('生成完成');
+  await expect(progress).toContainText('已完成 6/6 阶段');
+  await expect.poll(() => mock.counts['generation-end']).toBe(1);
+  await page.locator('.project-name').click();
+  await expect(exportButton(page)).toBeEnabled();
+  expect(mock.counts).toMatchObject({ confirm: 1, cad: 1, materials: 1 });
+});
+
+test('离开生成页面后失败原因在项目管理显示并持久保存', async ({ page }) => {
+  let release!: () => void;
+  const holdPreview = new Promise<void>(resolve => { release = resolve; });
+  await seed(page); const mock = await mockFlow(page, { holdPreview, previewFailures: 1 }); await open(page);
+  await expect.poll(() => mock.counts.preview).toBe(1);
+  await page.getByRole('link', { name: /项目管理/ }).click(); release();
+  const progress = page.getByTestId('project-generation-progress');
+  await expect(progress).toContainText('生成失败');
+  await expect(progress).toContainText('测试生图网络故障');
+  await expect.poll(async () => (await storedWorkflow(page))?.generation?.state).toBe('failed');
+  await page.reload();
+  await expect(progress).toContainText('测试生图网络故障');
+  await page.locator('.project-name').click();
+  await expect(page.getByRole('alert')).toContainText('测试生图网络故障');
+  expect(mock.counts.preview).toBe(1);
+});
+
+test('刷新后的历史运行状态标为中断，保留成果且不会重新收费生成', async ({ page }) => {
+  const workflow = makeWorkflow(false);
+  workflow.generation = { state: 'running', label: '生成彩色预览', detail: '正在处理', steps: [], startedAt: workflow.updatedAt, updatedAt: workflow.updatedAt };
+  await seed(page, workflow); const mock = await mockFlow(page); await page.goto('/#projects');
+  const progress = page.getByTestId('project-generation-progress');
+  await expect(progress).toContainText('已停止');
+  await expect(progress).toContainText('页面已重新加载');
+  await page.locator('.project-name').click();
+  await expect(confirmButton(page)).toBeEnabled();
+  expect(mock.counts['generation-begin'] || 0).toBe(0);
+});
+
+test('多个项目同时生成时进度独立，停止一个项目不影响另一个', async ({ page }) => {
+  let release!: () => void;
+  const holdPreview = new Promise<void>(resolve => { release = resolve; });
+  const projects = [productProject, { ...productProject, id: 'second-product-flow-test' }]
+    .map(project => ({ ...project, productWorkflow: createProductWorkflow(project) }));
+  await page.addInitScript(projects => localStorage.setItem('zhichuang-projects-v1', JSON.stringify(projects)), projects);
+  const mock = await mockFlow(page, { holdPreview }); await open(page);
+  await expect.poll(() => mock.counts.preview).toBe(1);
+  await page.getByRole('link', { name: /项目管理/ }).click();
+  await page.locator('tbody tr').nth(1).locator('.project-name').click();
+  await expect.poll(() => mock.counts.preview).toBe(2);
+  await page.getByRole('button', { name: '停止等待', exact: true }).filter({ visible: true }).click();
+  await page.getByRole('link', { name: /项目管理/ }).click();
+  const progress = page.getByTestId('project-generation-progress');
+  await expect(progress.nth(0)).toContainText('生成四张彩色预览');
+  await expect(progress.nth(1)).toContainText('已停止');
+  release();
+  await expect(progress.nth(0)).toContainText('待确认彩色预览');
+  await expect(progress.nth(1)).toContainText('已停止');
+  expect(mock.counts.preview).toBe(2);
+});
 async function open(page: Page) { await page.goto(`/#utility/${productProject.id}`); await expect(page.getByTestId('product-workflow')).toBeVisible(); }
 const confirmButton = (page: Page) => page.getByRole('button', { name: '确认预览并生成成品', exact: true });
 const exportButton = (page: Page) => page.getByRole('button', { name: '下载 Word 成品（.docx）', exact: true });

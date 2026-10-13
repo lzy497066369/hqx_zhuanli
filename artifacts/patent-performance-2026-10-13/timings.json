@@ -1,0 +1,381 @@
+{
+  "startedAt": "2026-10-13T03:36:11.521Z",
+  "scope": "Fresh synthetic solar mounting bracket, production service functions and browser compression/export; no API queue or database",
+  "models": {
+    "text": "gpt-6.1-sol",
+    "image": "gpt-image-2.5",
+    "vision": "gpt-6.1-sol"
+  },
+  "stages": [
+    {
+      "name": "review",
+      "startedAt": "2026-10-13T03:36:18.020Z",
+      "outcome": "completed",
+      "elapsedMs": 48375,
+      "completedAt": "2026-10-13T03:37:06.395Z"
+    },
+    {
+      "name": "brief",
+      "startedAt": "2026-10-13T03:37:06.402Z",
+      "outcome": "completed",
+      "elapsedMs": 139371,
+      "completedAt": "2026-10-13T03:39:25.773Z"
+    },
+    {
+      "name": "preview",
+      "startedAt": "2026-10-13T03:39:25.785Z",
+      "outcome": "completed",
+      "elapsedMs": 37678,
+      "completedAt": "2026-10-13T03:40:03.462Z"
+    },
+    {
+      "name": "confirm",
+      "startedAt": "2026-10-13T03:40:03.555Z",
+      "outcome": "completed",
+      "elapsedMs": 5,
+      "completedAt": "2026-10-13T03:40:03.560Z"
+    },
+    {
+      "name": "browser-image-compression",
+      "startedAt": "2026-10-13T03:40:03.604Z",
+      "outcome": "completed",
+      "elapsedMs": 671,
+      "completedAt": "2026-10-13T03:40:04.274Z"
+    },
+    {
+      "name": "cad",
+      "startedAt": "2026-10-13T03:40:04.276Z",
+      "outcome": "completed",
+      "elapsedMs": 100234,
+      "completedAt": "2026-10-13T03:41:44.511Z"
+    },
+    {
+      "name": "materials",
+      "startedAt": "2026-10-13T03:41:44.580Z",
+      "outcome": "completed",
+      "elapsedMs": 125732,
+      "completedAt": "2026-10-13T03:43:50.311Z"
+    },
+    {
+      "name": "word-export",
+      "startedAt": "2026-10-13T03:43:50.390Z",
+      "outcome": "completed",
+      "elapsedMs": 1591,
+      "completedAt": "2026-10-13T03:43:51.981Z"
+    }
+  ],
+  "requests": [
+    {
+      "id": 1,
+      "stage": "review",
+      "host": "api.psydo.top",
+      "endpoint": "/v1/chat/completions",
+      "model": "gpt-6.1-sol",
+      "stream": true,
+      "maxTokens": 9000,
+      "requestBytes": 4473,
+      "systemChars": 1402,
+      "userChars": 696,
+      "startedAt": "2026-10-13T03:36:18.033Z",
+      "contentChars": 1984,
+      "bytes": 289323,
+      "contentChunks": 1194,
+      "maxContentGapMs": 553,
+      "headersMs": 8278,
+      "status": 200,
+      "contentType": "text/event-stream",
+      "firstByteMs": 8284,
+      "firstContentMs": 8286,
+      "lastContentMs": 48255,
+      "finishReason": "stop",
+      "usage": {
+        "prompt_tokens": 5287,
+        "completion_tokens": 1226,
+        "total_tokens": 6513
+      },
+      "totalMs": 48358
+    },
+    {
+      "id": 2,
+      "stage": "brief",
+      "host": "api.psydo.top",
+      "endpoint": "/v1/chat/completions",
+      "model": "gpt-6.1-sol",
+      "stream": true,
+      "maxTokens": 14000,
+      "requestBytes": 3935,
+      "systemChars": 941,
+      "userChars": 799,
+      "startedAt": "2026-10-13T03:37:06.408Z",
+      "contentChars": 5429,
+      "bytes": 909271,
+      "contentChunks": 3760,
+      "maxContentGapMs": 1055,
+      "headersMs": 12836,
+      "status": 200,
+      "contentType": "text/event-stream",
+      "firstByteMs": 12837,
+      "firstContentMs": 14674,
+      "lastContentMs": 139124,
+      "finishReason": "stop",
+      "usage": {
+        "prompt_tokens": 5252,
+        "completion_tokens": 7717,
+        "total_tokens": 12969,
+        "completion_tokens_details": {
+          "reasoning_tokens": 372
+        }
+      },
+      "totalMs": 139358
+    },
+    {
+      "id": 3,
+      "stage": "preview",
+      "host": "api.psydo.top",
+      "endpoint": "/v1/images/generations",
+      "model": "gpt-image-2.5",
+      "requestBytes": 13011,
+      "startedAt": "2026-10-13T03:39:25.793Z",
+      "contentChars": 0,
+      "bytes": 4124461,
+      "contentChunks": 0,
+      "maxContentGapMs": 0,
+      "headersMs": 27861,
+      "status": 200,
+      "contentType": "application/json",
+      "firstByteMs": 27861,
+      "totalMs": 29314
+    },
+    {
+      "id": 4,
+      "stage": "preview",
+      "host": "api.psydo.top",
+      "endpoint": "/v1/images/generations",
+      "model": "gpt-image-2.5",
+      "requestBytes": 12990,
+      "startedAt": "2026-10-13T03:39:25.793Z",
+      "contentChars": 0,
+      "bytes": 3751408,
+      "contentChunks": 0,
+      "maxContentGapMs": 0,
+      "headersMs": 27598,
+      "status": 200,
+      "contentType": "application/json",
+      "firstByteMs": 27598,
+      "totalMs": 28897
+    },
+    {
+      "id": 5,
+      "stage": "preview",
+      "host": "api.psydo.top",
+      "endpoint": "/v1/images/generations",
+      "model": "gpt-image-2.5",
+      "requestBytes": 13002,
+      "startedAt": "2026-10-13T03:39:25.793Z",
+      "contentChars": 0,
+      "bytes": 3623756,
+      "contentChunks": 0,
+      "maxContentGapMs": 0,
+      "headersMs": 36249,
+      "status": 200,
+      "contentType": "application/json",
+      "firstByteMs": 36249,
+      "totalMs": 37650
+    },
+    {
+      "id": 6,
+      "stage": "preview",
+      "host": "api.psydo.top",
+      "endpoint": "/v1/images/generations",
+      "model": "gpt-image-2.5",
+      "requestBytes": 13011,
+      "startedAt": "2026-10-13T03:39:25.793Z",
+      "contentChars": 0,
+      "bytes": 3124685,
+      "contentChunks": 0,
+      "maxContentGapMs": 0,
+      "headersMs": 27789,
+      "status": 200,
+      "contentType": "application/json",
+      "firstByteMs": 27790,
+      "totalMs": 29219
+    },
+    {
+      "id": 7,
+      "stage": "cad",
+      "host": "api.psydo.top",
+      "endpoint": "/v1/chat/completions",
+      "model": "gpt-6.1-sol",
+      "stream": true,
+      "maxTokens": 12000,
+      "requestBytes": 383803,
+      "systemChars": 1502,
+      "userChars": 5816,
+      "startedAt": "2026-10-13T03:40:04.309Z",
+      "contentChars": 4141,
+      "bytes": 466836,
+      "contentChunks": 1935,
+      "maxContentGapMs": 433,
+      "headersMs": 62144,
+      "status": 200,
+      "contentType": "text/event-stream",
+      "firstByteMs": 62144,
+      "firstContentMs": 62144,
+      "lastContentMs": 97913,
+      "finishReason": "stop",
+      "usage": {
+        "prompt_tokens": 13785,
+        "completion_tokens": 2396,
+        "total_tokens": 16181,
+        "completion_tokens_details": {
+          "reasoning_tokens": 403
+        }
+      },
+      "totalMs": 98127
+    },
+    {
+      "id": 8,
+      "stage": "materials",
+      "host": "api.psydo.top",
+      "endpoint": "/v1/chat/completions",
+      "model": "gpt-6.1-sol",
+      "stream": true,
+      "maxTokens": 16000,
+      "requestBytes": 23953,
+      "systemChars": 2481,
+      "userChars": 6193,
+      "startedAt": "2026-10-13T03:41:44.587Z",
+      "contentChars": 5362,
+      "bytes": 1081254,
+      "contentChunks": 4475,
+      "maxContentGapMs": 1622,
+      "headersMs": 2915,
+      "status": 200,
+      "contentType": "text/event-stream",
+      "firstByteMs": 2916,
+      "firstContentMs": 7456,
+      "lastContentMs": 125429,
+      "finishReason": "stop",
+      "usage": {
+        "prompt_tokens": 11036,
+        "completion_tokens": 9001,
+        "total_tokens": 20037,
+        "completion_tokens_details": {
+          "reasoning_tokens": 195
+        }
+      },
+      "totalMs": 125718
+    }
+  ],
+  "progress": [
+    {
+      "stage": "review",
+      "at": "2026-10-13T03:36:18.030Z",
+      "label": "独立检查产品逻辑",
+      "detail": "正在交叉核查名称、结构、运动、空间、材料、功能和使用条件"
+    },
+    {
+      "stage": "review",
+      "at": "2026-10-13T03:36:18.032Z",
+      "label": "调用主模型",
+      "detail": "等待模型生成内容"
+    },
+    {
+      "stage": "brief",
+      "at": "2026-10-13T03:37:06.408Z",
+      "label": "生成详细产品简介",
+      "detail": "将已通过校验的特征落实为一个完整产品及统一部件编号"
+    },
+    {
+      "stage": "brief",
+      "at": "2026-10-13T03:37:06.408Z",
+      "label": "调用主模型",
+      "detail": "等待模型生成内容"
+    },
+    {
+      "stage": "preview",
+      "at": "2026-10-13T03:39:25.792Z",
+      "label": "并行生成四张彩色预览",
+      "detail": "主体图、前视图、俯视图、右视图各提交一次生图请求"
+    },
+    {
+      "stage": "cad",
+      "at": "2026-10-13T03:40:04.306Z",
+      "label": "视觉模型分析四张预览",
+      "detail": "参照简介的部件清单，为同一产品编写 FreeCAD 建模脚本"
+    },
+    {
+      "stage": "cad",
+      "at": "2026-10-13T03:40:04.308Z",
+      "label": "调用主模型",
+      "detail": "等待模型生成内容"
+    },
+    {
+      "stage": "cad",
+      "at": "2026-10-13T03:41:42.442Z",
+      "label": "FreeCAD 生成统一模型",
+      "detail": "在隔离目录执行已校验的脚本并提取网格"
+    },
+    {
+      "stage": "cad",
+      "at": "2026-10-13T03:41:43.478Z",
+      "label": "投影专利附图",
+      "detail": "从同一模型投影立体图、前视图、俯视图和右视图，并按部件标注编号"
+    },
+    {
+      "stage": "materials",
+      "at": "2026-10-13T03:41:44.586Z",
+      "label": "生成最终申请文案",
+      "detail": "仅依据已确认预览对应的产品简介生成，不改写核心产品结构"
+    },
+    {
+      "stage": "materials",
+      "at": "2026-10-13T03:41:44.586Z",
+      "label": "调用主模型",
+      "detail": "等待模型生成内容"
+    }
+  ],
+  "network": [
+    {
+      "host": "api.psydo.top",
+      "method": "HEAD",
+      "path": "/v1",
+      "dnsMs": 74,
+      "tcpMs": 80,
+      "tlsMs": 739,
+      "headersMs": 954,
+      "status": 200,
+      "totalMs": 954
+    },
+    {
+      "host": "api.psydo.top",
+      "method": "HEAD",
+      "path": "/v1",
+      "dnsMs": 8,
+      "tcpMs": 12,
+      "tlsMs": 586,
+      "headersMs": 802,
+      "status": 200,
+      "totalMs": 803
+    },
+    {
+      "host": "api.psydo.top",
+      "method": "HEAD",
+      "path": "/v1",
+      "dnsMs": 4,
+      "tcpMs": 8,
+      "tlsMs": 580,
+      "headersMs": 811,
+      "status": 200,
+      "totalMs": 811
+    }
+  ],
+  "complete": true,
+  "cad": {
+    "vertices": 13328,
+    "triangles": 26512,
+    "version": "1.1.4"
+  },
+  "documentBytes": 142207,
+  "completedAt": "2026-10-13T03:43:51.999Z"
+}

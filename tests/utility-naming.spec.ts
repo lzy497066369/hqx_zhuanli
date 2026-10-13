@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { checkName, checkProduct, emptyProfile, isNamingRecord, validateProfile } from '../src/features/utility/naming';
+import { checkName, checkProduct, emptyProfile, isNamingRecord, isStructuralFeature, validateProfile } from '../src/features/utility/naming';
 import { mockNaming } from './fixtures/namingAi';
 
 const company = '明远设备有限公司';
@@ -12,6 +12,12 @@ test('规则：禁用宣传语和软件客体，支持多选结构特征及旧�
   expect(checkName('一种高效H型钢梁', profile).errors.length).toBeGreaterThan(0);
   expect(checkName('一种数据处理方法', profile).errors.length).toBeGreaterThan(0);
   expect(isNamingRecord({ version: 1, profile, candidates: [], selectedName: '', confirmed: false })).toBe(true);
+});
+
+test('防脱挡边是实际结构，防脱效果本身不能当作结构资料', () => {
+  expect(isStructuralFeature('防脱挡边')).toBe(true);
+  expect(isStructuralFeature('防脱')).toBe(false);
+  expect(validateProfile({ ...emptyProfile, company, business: '光伏组件安装支架', product: '光伏组件安装支架', features: 'T形滑槽、锁紧螺栓、防脱挡边' })).toEqual({});
 });
 
 test('规则：名称主体必须是所填产品本身，不能改成它的配件或加工设备', () => {

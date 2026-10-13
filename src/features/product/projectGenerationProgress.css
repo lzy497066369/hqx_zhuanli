@@ -1,0 +1,12 @@
+.project-generation { margin-top: 8px; max-width: 410px; min-width: 0; }
+.project-generation-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; }
+.project-generation-heading strong { color: #4c574e; font-weight: 500; }
+.project-generation-heading small { color: #697067; font-size: 11px; }
+.project-generation.running strong { color: #346837; }
+.project-generation.failed strong { color: #a33232; }
+.project-generation-track { display: flex; gap: 4px; height: 4px; margin: 6px 0; }
+.project-generation-track span { flex: 1; background: #e9ede7; border-radius: 4px; }
+.project-generation-track span.done { background: #5d8358; }
+.project-generation p { margin: 0; color: #626a62; font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; white-space: normal; }
+.project-table-wrap td:first-child:has(.project-generation) { padding-top: 12px; padding-bottom: 12px; }
+.project-session[hidden] { display: none; }
