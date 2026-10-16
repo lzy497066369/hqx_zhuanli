@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import { auditedFetch, markAiResponseFailure } from './aiAudit.ts';
+import { responseText } from './aiSupport.ts';
+import { createUsageRecorder } from './aiUsage.ts';
 import type { ProductBrief, InnovationNameCandidate, InnovationCandidatesResponse, StructurePlanInput } from '../src/features/utility/patentStructure.ts';
 import { isInnovationNameCandidate, isProductBrief, normalizeStructureFacts, patentStructureSource } from '../src/features/utility/patentStructure.ts';
 import type { PatentResearch } from '../src/features/utility/patentResearch.ts';
 import type { AiConfig } from './aiSupport.ts';
-import { AiFailure, AI_USER_AGENT, aiProviders, generationProviders, isTransientNetworkError, markProviderFailed, markProviderSucceeded, readChatChoice, shouldCoolDownProvider } from './aiSupport.ts';
+import { AiFailure, AI_USER_AGENT, aiProviders, awaitWithSignal, generationProviders, isTransientNetworkError, markProviderFailed, markProviderSucceeded, readChatChoice, shouldCoolDownProvider } from './aiSupport.ts';
 import { researchPatents } from './patentResearch.ts';
 import { isStructureDraft } from '../src/features/utility/structureDraft.ts';
 import { normalizeStructureDraft } from '../src/features/utility/structureDraftNormalizer.ts';
@@ -105,7 +108,7 @@ function isCandidateEnvelope(value: unknown): value is { candidates: InnovationN
 
 type StructureAcceptance = boolean | string[];
 export type ProgressReporter = (label: string, detail: string) => void;
-type ChatJsonOptions = { lengthRetry?: { prompt: string; maxTokens: number }; validationRetry?: { prompt: (details: string[]) => string; maxTokens: number }; logCompletion?: boolean; attemptTimeoutMs?: number; stopOnInvalid?: boolean; onProgress?: ProgressReporter; diagnostic?: (result: { model: string; httpStatus: number | null; elapsedMs: number; outcome: string; finishReason: unknown; validation?: Record<string, number> }) => void };
+type ChatJsonOptions = { lengthRetry?: { prompt: string; maxTokens: number }; validationRetry?: { prompt: (details: string[]) => string; maxTokens: number; maxRetries?: number }; logCompletion?: boolean; attemptTimeoutMs?: number; attemptTimeoutMessage?: string; stopOnInvalid?: boolean; onProgress?: ProgressReporter; diagnostic?: (result: { model: string; httpStatus: number | null; elapsedMs: number; outcome: string; finishReason: unknown; validation?: Record<string, number> }) => void };
 
 function validationCategories(errors: string[]) {
   const counts: Record<string, number> = {};
@@ -242,6 +245,7 @@ function logProviderFailure(provider: { baseUrl: string; apiKey: string; model: 
 }
 
 export async function chatJson(prompt: string, input: unknown, config: AiConfig, signal: AbortSignal, fetcher: typeof fetch, maxTokens: number, imageData?: string | string[], accept?: (value: unknown) => StructureAcceptance, options?: ChatJsonOptions) {
+  fetcher = auditedFetch(fetcher);
   // 视觉输入：一张或多张 data URL 作为 image_url 内容块附在同一条用户消息后。
   const images = (Array.isArray(imageData) ? imageData : imageData ? [imageData] : []).filter(Boolean);
   // 熔断：跳过冷却中的 provider，直达可用服务。
@@ -259,7 +263,7 @@ export async function chatJson(prompt: string, input: unknown, config: AiConfig,
   for (const provider of providers) {
     // 截断重试与校验修正重试资格按 provider 独立：上一个 provider 用掉重试机会，不应剥夺下一个 provider 的重试资格。
     let lengthRetryUsed = false;
-    let validationRetryUsed = false;
+    let validationRetries = 0;
     let validationDetails: string[] | null = null;
     // 本轮请求的提示词阶段：initial=常规请求，length=截断后精简重试，validation=未通过校验后针对性修正。
     let phase: 'initial' | 'length' | 'validation' = 'initial';
@@ -272,29 +276,39 @@ export async function chatJson(prompt: string, input: unknown, config: AiConfig,
       const requestSignal = attemptTimeout ? AbortSignal.any([signal, attemptTimeout]) : signal;
       let httpStatus: number | null = null;
       let finishReason: unknown;
+      let usage: unknown;
+      let requested = false;
+      let auditResponse: Response | undefined;
+      const recordUsage = createUsageRecorder(provider.model);
       try {
         const systemPrompt = phase === 'validation' ? options!.validationRetry!.prompt(validationDetails!) : phase === 'length' ? options!.lengthRetry!.prompt : prompt;
         const tokenBudget = phase === 'validation' ? options!.validationRetry!.maxTokens : phase === 'length' ? options!.lengthRetry!.maxTokens : maxTokens;
-        if (strict) requestSignal.throwIfAborted();
+        requestSignal.throwIfAborted();
         providerRequestCount += 1;
-        const response = await fetcher(`${provider.baseUrl}/chat/completions`, {
+        requested = true;
+        const response = await awaitWithSignal(fetcher(`${provider.baseUrl}/chat/completions`, {
           method: 'POST', redirect: 'error', signal: requestSignal,
           headers: { Authorization: `Bearer ${provider.apiKey}`, 'Content-Type': 'application/json', 'User-Agent': AI_USER_AGENT },
           // 流式：中转站对长时间无响应字节的连接约 125 秒就关闭，非流式长文必死；strict 测试策略固定为非流式。
-          body: JSON.stringify({ model: provider.model, stream: !strict, max_completion_tokens: tokenBudget, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: images.length ? [{ type: 'text', text: JSON.stringify(input) }, ...images.map(url => ({ type: 'image_url', image_url: { url } }))] : JSON.stringify(input) }] }),
-        });
+          body: JSON.stringify({ model: provider.model, stream: !strict, ...(!strict ? { stream_options: { include_usage: true } } : {}), max_completion_tokens: tokenBudget, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: images.length ? [{ type: 'text', text: JSON.stringify(input) }, ...images.map(url => ({ type: 'image_url', image_url: { url } }))] : JSON.stringify(input) }] }),
+        }).then(response => {
+          if (requestSignal.aborted) void response.body?.cancel().catch(() => {});
+          return response;
+        }), requestSignal);
+        auditResponse = response;
         httpStatus = response.status;
         if (!response.ok) {
           if (options?.logCompletion) logCompletion(provider.model, response.status, null);
-          await response.body?.cancel().catch(() => {});
+          await responseText(response, 16 * 1024, requestSignal).catch(() => '');
           if (response.status === 401 || response.status === 403) throw new AiFailure(502, 'AI_AUTH', 'AI 服务拒绝授权，请检查服务端密钥及模型权限。');
           if (response.status === 429) throw new AiFailure(429, 'AI_RATE_LIMIT', 'AI 服务额度不足或请求过于频繁，请检查额度或稍后重试。');
           throw new AiFailure(502, 'AI_UPSTREAM', 'AI 服务调用失败，请检查服务状态、模型配置或稍后重试。');
         }
-        const choice = await readChatChoice(response);
+        const choice = await readChatChoice(response, value => { usage = value; }, requestSignal);
         finishReason = choice?.finish_reason;
         if (options?.logCompletion) logCompletion(provider.model, response.status, choice?.finish_reason);
         if (!strict && choice?.finish_reason === 'length' && phase !== 'length' && options?.lengthRetry && !lengthRetryUsed && !choice.message?.refusal) {
+          await markAiResponseFailure(response, '输出达到长度上限，重新请求');
           lengthRetryUsed = true;
           validationDetails = null;
           phase = 'length';
@@ -310,13 +324,14 @@ export async function chatJson(prompt: string, input: unknown, config: AiConfig,
         const acceptance = accept?.(value);
         if (accept && acceptance !== true) {
           const details = Array.isArray(acceptance) ? acceptance : [];
+          await markAiResponseFailure(response, { code: 'AI_INVALID_OUTPUT', details });
           if (!strict && options?.stopOnInvalid) {
             if (requestSignal.aborted) throw requestSignal.reason;
             options.diagnostic?.({ model: provider.model, httpStatus, elapsedMs: Date.now() - started, outcome: 'AI_INVALID_OUTPUT', finishReason, validation: validationCategories(details) });
             return { value, model: provider.model, invalid: details };
           }
-          if (!strict && phase !== 'validation' && options?.validationRetry && !validationRetryUsed) {
-            validationRetryUsed = true;
+          if (!strict && options?.validationRetry && validationRetries < (options.validationRetry.maxRetries ?? 1)) {
+            validationRetries++;
             validationDetails = details;
             phase = 'validation';
             options?.diagnostic?.({ model: provider.model, httpStatus, elapsedMs: Date.now() - started, outcome: 'AI_INVALID_OUTPUT', finishReason, validation: validationCategories(details) });
@@ -330,7 +345,8 @@ export async function chatJson(prompt: string, input: unknown, config: AiConfig,
         if (!strict) markProviderSucceeded(provider);
         return { value, model: provider.model };
       } catch (error) {
-        const failure = attemptTimeout?.aborted && !signal.aborted ? new AiFailure(504, 'AI_ATTEMPT_TIMEOUT', '单次结构生成调用超时。') : error;
+        await markAiResponseFailure(auditResponse, error);
+        const failure = attemptTimeout?.aborted && !signal.aborted ? new AiFailure(504, 'AI_ATTEMPT_TIMEOUT', options?.attemptTimeoutMessage || '单次结构生成调用超时。') : error;
         options?.diagnostic?.({ model: provider.model, httpStatus, elapsedMs: Date.now() - started, outcome: signal.aborted ? 'aborted' : failure instanceof AiFailure ? failure.code : 'network_error', finishReason, ...(failure instanceof AiFailure && failure.code === 'AI_INVALID_OUTPUT' ? { validation: validationCategories(failure.details) } : {}) });
         recordAttempt(httpStatus, signal.aborted ? 'aborted' : failure instanceof AiFailure ? failure.code : 'network_error');
         if (strict) throw failure;
@@ -341,6 +357,8 @@ export async function chatJson(prompt: string, input: unknown, config: AiConfig,
         // 可用性故障（鉴权/限流/上游/网络/单次超时）才熔断；内容质量问题只在本请求内切换。
         if (shouldCoolDownProvider(failure)) markProviderFailed(provider);
         break;
+      } finally {
+        if (requested) recordUsage(usage);
       }
     }
   }

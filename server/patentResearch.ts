@@ -1,4 +1,5 @@
 import type { DrawingPlanInput } from '../src/features/utility/aiDrawing.ts';
+import { markAiResponseFailure } from './aiAudit.ts';
 import { extractVerifiedPatentFacts, isPatentResearch, patentUrl } from '../src/features/utility/patentResearch.ts';
 import type { PatentResearch, PatentSource, ResponsesQueryCoverage } from '../src/features/utility/patentResearch.ts';
 import { buildResearchEvidence } from '../src/features/utility/patentEvidence.ts';
@@ -190,6 +191,7 @@ export async function researchPatents(input: DrawingPlanInput, config: AiConfig,
   for (const provider of providers) {
     const started = Date.now();
     let httpStatus: number | null = null;
+    let auditResponse: Response | undefined;
     let failureKind: ResearchFailureKind | undefined;
     const protocol = config.researchProtocol || 'responses';
     const diagnostics: NativeResearchDiagnostics = { searchActionCount: 0, searchResultCount: 0, qualifiedPatentResultCount: 0,
@@ -223,6 +225,7 @@ export async function researchPatents(input: DrawingPlanInput, config: AiConfig,
           input: JSON.stringify({ title: input.title, technicalField: input.technicalField }),
         }),
       });
+      auditResponse = response;
       httpStatus = response.status;
       if (!response.ok) {
         const status = response.status;
@@ -249,6 +252,7 @@ export async function researchPatents(input: DrawingPlanInput, config: AiConfig,
       onAttempt?.({ model: provider.model, httpStatus, elapsedMs: Date.now() - started, outcome: 'completed', protocol, ...diagnostics, ...responsesDiagnostic() });
       return result;
     } catch (error) {
+      await markAiResponseFailure(auditResponse, error);
       onAttempt?.({ model: provider.model, httpStatus, elapsedMs: Date.now() - started, outcome: signal.aborted ? 'aborted' : error instanceof AiFailure ? error.code : 'network_error', failureKind, protocol, ...diagnostics, ...responsesDiagnostic() });
       lastError = error;
       if (signal.aborted) throw error;

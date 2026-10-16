@@ -1,0 +1,15 @@
+import fs from 'node:fs/promises';
+import JSZip from 'jszip';
+const root=process.env.DRAWING_ACCEPTANCE_DIR || 'artifacts/patent-drawing-2026-10-14/live-callouts';
+const source=JSON.parse(await fs.readFile(`${root}/accepted-workflow.json`,'utf8'));
+const zip=await JSZip.loadAsync(await fs.readFile(`${root}/patent-with-verified-drawings.docx`));
+const xml=await zip.file('word/document.xml').async('string');
+const decode=s=>s.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,'&');
+const text=[...xml.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)].map(m=>decode(m[1])).join('');
+const normal=s=>s.replace(/\s+/g,'');
+const fields=['abstract','technicalField','background','content','drawings','embodiment'];
+const contentMatches=fields.every(k=>normal(text).includes(normal(source.materials[k])))&&source.materials.claims.every(c=>normal(text).includes(normal(c)));
+const pictureCount=(xml.match(/<pic:pic\b/g)||[]).length;
+const captions=source.cad.views.map((v,i)=>({figure:i+1,title:v.title,caption:text.includes(`图${i+1}`),image:xml.includes(`name="图${i+1} ${v.title}"`)}));
+const report={passed:contentMatches&&pictureCount===source.cad.views.length&&captions.every(c=>c.caption&&c.image),contentMatchesActualGeneratedText:contentMatches,pictureCount,expectedPictureCount:source.cad.views.length,captions};
+await fs.writeFile(`${root}/word-audit.json`,JSON.stringify(report,null,2));console.log(JSON.stringify(report));if(!report.passed)process.exitCode=1;

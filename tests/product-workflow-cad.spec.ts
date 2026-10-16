@@ -80,3 +80,21 @@ test('FreeCAD 命令行：脚本在隔离目录执行，失败和超时不产出
   await expect(runFreeCad('import Part\ndef build_model():\n    import os\n    return Part.makeBox(1, 1, 1)\n', command!, { timeoutMs: 120000 })).rejects.toMatchObject({ code: 'CAD_SCRIPT_REJECTED' });
   await expect(runFreeCad('import Part\ndef build_model():\n    while True:\n        pass\n', command!, { timeoutMs: 8000 })).rejects.toMatchObject({ code: 'CAD_TIMEOUT' });
 });
+test('网格超过投影预算时自动降低精度出图，不再直接判定模型过于复杂', async () => {
+  test.setTimeout(180000);
+  const command = await resolveFreeCad(productConfig);
+  test.skip(!command, '本机未安装 FreeCAD，跳过真实建模测试。');
+  // 44 个半径 60 毫米的球面在默认精度下约 10.7 万个三角面：超过投影预算，但远低于硬上限。
+  // 曲面网格由角度容差主导（实测线性容差放大后每个球面仍是 2444 个三角面），
+  // 只放宽线性容差救不回来，所以必须同时收紧角度容差，结果落回预算内。
+  const script = ['import Part', 'from FreeCAD import Vector', '', 'def build_model():', '    balls = []',
+    '    for index in range(44):', '        x = (index % 8) * 160', '        y = ((index // 8) % 8) * 160',
+    '        z = (index // 64) * 160', '        balls.append(Part.makeSphere(60, Vector(x, y, z)))',
+    '    return {"1": Part.makeCompound(balls)}'].join('\n');
+  expect(validateCadScript(script)).toEqual([]);
+  const run = await runFreeCad(script, command!, { timeoutMs: 150000 });
+  expect([...new Set(run.mesh.parts)]).toEqual(['1']);
+  expect(run.mesh.triangles.length).toBeLessThanOrEqual(100000);
+  expect(run.mesh.vertices.length).toBeLessThanOrEqual(300000);
+  expect(renderCadViews(run.mesh, '测试')).toHaveLength(4);
+});

@@ -31,3 +31,9 @@ dist-ssr
 .env
 .env.*
 !.env.example
+
+# Local diagnostics and generated runtime files
+/artifacts/
+/tmp/
+__pycache__/
+*.py[cod]

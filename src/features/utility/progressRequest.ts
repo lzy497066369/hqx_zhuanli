@@ -1,10 +1,12 @@
 import { STRICT_E2E_POLICY } from './aiExecutionPolicy';
 import type { ProgressStep } from './generationProgress';
 import { workspaceHeaders } from '../../storage/workspaceContext';
+import { isTokenUsage } from '../product/tokenUsage';
+import type { TokenUsage } from '../product/tokenUsage';
 
-type StreamEvent = { type: 'progress'; step: ProgressStep } | { type: 'result'; data: unknown } | { type: 'error'; error: { code?: string; message?: string; details?: string[] } };
+type StreamEvent = { type: 'progress'; step: ProgressStep } | { type: 'usage'; usage: unknown } | { type: 'result'; data: unknown } | { type: 'error'; error: { code?: string; message?: string; details?: string[] } };
 
-export async function progressRequest<T>(path: string, body: unknown, onProgress: (step: ProgressStep) => void, signal?: AbortSignal, headers: Record<string, string> = {}): Promise<{ data: T; requestId?: string }> {
+export async function progressRequest<T>(path: string, body: unknown, onProgress: (step: ProgressStep) => void, signal?: AbortSignal, headers: Record<string, string> = {}, onUsage?: (usage: TokenUsage) => void): Promise<{ data: T; requestId?: string }> {
   const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson', ...workspaceHeaders(), ...headers }, body: JSON.stringify(body), signal });
   const requestId = response.headers.get('X-Structure-Request-Id') || undefined;
   if (response.headers.get('Content-Type')?.includes('application/x-ndjson')) {
@@ -23,6 +25,7 @@ export async function progressRequest<T>(path: string, body: unknown, onProgress
         throw Object.assign(new Error('进度数据解析失败，未修改已有成果；请重试。'), { code: 'STREAM_PARSE_ERROR', requestId });
       }
       if (event.type === 'progress' && typeof event.step?.label === 'string' && typeof event.step?.detail === 'string') onProgress(event.step);
+      if (event.type === 'usage' && isTokenUsage(event.usage)) onUsage?.(event.usage);
       if (event.type === 'error') throw Object.assign(new Error(event.error.message || '生成暂时不可用，请重试。'), { code: event.error.code, details: event.error.details, requestId });
       if (event.type === 'result') result = event.data as T;
     };
@@ -38,6 +41,12 @@ export async function progressRequest<T>(path: string, body: unknown, onProgress
     } finally { reader.releaseLock(); }
     if (result === undefined) throw Object.assign(new Error('进度连接中断，未收到完整结果；请重试。'), { code: 'STREAM_INTERRUPTED', requestId });
     return { data: result, requestId };
+  }
+  const usageHeader = response.headers.get('X-AI-Token-Usage');
+  if (usageHeader) {
+    let records: unknown;
+    try { records = JSON.parse(decodeURIComponent(usageHeader)); } catch { /* Missing usage must not block a usable result. */ }
+    if (Array.isArray(records)) for (const record of records) if (isTokenUsage(record)) onUsage?.(record);
   }
   const value = await response.json().catch(() => ({}));
   if (!response.ok) throw Object.assign(new Error(value.error?.message || '生成暂时不可用，请重试。'), { code: value.error?.code, details: value.error?.details, requestId });

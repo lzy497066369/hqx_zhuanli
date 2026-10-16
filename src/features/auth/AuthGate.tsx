@@ -13,7 +13,10 @@ export function AuthGate({ children }: { children: (user: AuthUser | null) => Re
   useEffect(() => {
     let cancelled = false;
     authRequest<{ enabled: boolean; user: AuthUser | null }>('me').then(result => {
-      if (!cancelled) { setLoadError(''); setSession(result); }
+      if (!cancelled) {
+        if (result.user && result.user.role !== 'admin' && !location.hash) history.replaceState(null, '', '#projects');
+        setLoadError(''); setSession(result);
+      }
     }).catch(error => { if (!cancelled) setLoadError(error instanceof Error ? error.message : '登录状态加载失败。'); });
     return () => { cancelled = true; };
   }, [attempt]);
@@ -21,7 +24,10 @@ export function AuthGate({ children }: { children: (user: AuthUser | null) => Re
     ? <><p role="alert">{loadError}</p><button className="auth-submit" onClick={() => { setLoadError(''); setAttempt(value => value + 1); }}>重新连接 <ArrowRight size={18} /></button></>
     : <p role="status"><LoaderCircle className="auth-spinner" size={18} /> 正在确认登录状态…</p>}</main>;
   if (!session.enabled || session.user) return children(session.user);
-  return <AuthPage onAuthenticated={user => setSession({ enabled: true, user })} />;
+  return <AuthPage onAuthenticated={user => {
+    if (user.role !== 'admin') history.replaceState(null, '', '#projects');
+    setSession({ enabled: true, user });
+  }} />;
 }
 
 function AuthPage({ onAuthenticated }: { onAuthenticated: (user: AuthUser) => void }) {

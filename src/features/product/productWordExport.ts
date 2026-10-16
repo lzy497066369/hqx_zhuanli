@@ -1,9 +1,10 @@
 import { Document, ImageRun, Paragraph, TextRun } from 'docx';
 import type { CadViewDrawing, ProductImage, ProductPreview, ProductWorkflow } from './productWorkflow';
-import { CAD_VIEWS, PREVIEW_VIEWS, hasCurrentCad, isProductWorkflow, isProductWorkflowComplete } from './productWorkflow';
+import { PREVIEW_VIEWS, hasCurrentCad, isProductWorkflow, isProductWorkflowComplete } from './productWorkflow';
 import { PATENT_FIGURE_TEMPLATES } from './productPrompts';
 import { fitWordImage, packPatentWord, patentSection, WORD_BODY, WORD_BODY_PARAGRAPH, WORD_METADATA, WORD_STYLES, wordCaption, wordHeading, wordImageParagraph, wordTitle } from '../utility/wordFormat';
 import { sha256Hex } from './digest';
+import type { PatentExportDocument, PatentExportFigure } from '../export/patentDocument';
 
 function body(text: string): Paragraph {
   return new Paragraph({ ...WORD_BODY_PARAGRAPH, children: [new TextRun({ text, ...WORD_BODY })] });
@@ -83,34 +84,37 @@ export async function previewImagesForVision(preview: ProductPreview): Promise<{
   }
   return results;
 }
-export async function createProductWordBlob(workflow: ProductWorkflow): Promise<Blob> {
+export async function prepareProductPatentExport(workflow: ProductWorkflow): Promise<PatentExportDocument> {
   if (!isProductWorkflow(workflow) || !isProductWorkflowComplete(workflow, PATENT_FIGURE_TEMPLATES.map(template => template.id))) throw new Error('请先确认当前彩色预览，并完成同一版本的文案与全部附图。');
   const brief = workflow.brief!;
   const materials = workflow.materials!;
-  const specification = [wordTitle(materials.title)];
-  for (const [heading, text] of [
+  const figures: PatentExportFigure[] = [];
+  if (hasCurrentCad(workflow)) {
+    for (const [index, view] of workflow.cad!.views.entries()) figures.push({ ...await cadFigureForWord(view), label: `图${index + 1}`, description: view.title });
+  } else {
+    for (const [index, template] of PATENT_FIGURE_TEMPLATES.entries()) figures.push({ ...await patentImageForWord(workflow.figures[template.id]), label: `图${index + 1}`, description: template.title });
+  }
+  return { title: materials.title, abstract: materials.abstract, claims: materials.claims, figures, sections: [
     ['技术领域', materials.technicalField], ['背景技术', materials.background],
     [brief.selection.patentType === 'invention' ? '发明内容' : '实用新型内容', materials.content],
     ['附图说明', materials.drawings], ['具体实施方式', materials.embodiment],
-  ]) specification.push(wordHeading(heading), ...paragraphs(text));
+  ].map(([title, text]) => ({ title, paragraphs: text.split(/\n+/).map(line => line.trim()).filter(Boolean) })) };
+}
+export async function createProductWordBlob(workflow: ProductWorkflow): Promise<Blob> {
+  const content = await prepareProductPatentExport(workflow);
+  const specification = [wordTitle(content.title)];
+  for (const section of content.sections) specification.push(wordHeading(section.title), ...section.paragraphs.map(body));
   const figures: Paragraph[] = [];
-  const addFigure = (png: { data: Uint8Array; width: number; height: number }, index: number, title: string) => {
-    const label = `图${index + 1} ${title}`;
+  for (const [index, png] of content.figures.entries()) {
+    const label = `${png.label} ${png.description}`;
     figures.push(wordImageParagraph([new ImageRun({ type: 'png', data: png.data, transformation: fitWordImage(png.width, png.height, true),
-      altText: { name: label, title: label, description: `${materials.title}的${title}` } })], index > 0, true), wordCaption(`图${index + 1}`));
-  };
-  if (hasCurrentCad(workflow)) {
-    const cad = workflow.cad!;
-    const ordered = CAD_VIEWS.map(view => cad.views.find(item => item.view === view.id)).filter((view): view is CadViewDrawing => !!view);
-    for (const [index, view] of ordered.entries()) addFigure(await cadFigureForWord(view), index, view.title);
-  } else {
-    for (const [index, template] of PATENT_FIGURE_TEMPLATES.entries()) addFigure(await patentImageForWord(workflow.figures[template.id]), index, template.title);
+      altText: { name: label, title: label, description: `${content.title}的${png.description}` } })], index > 0, true), wordCaption(png.label));
   }
   // 正式申请文件只含摘要、权利要求书、说明书和说明书附图；简介、提示词、建模脚本等生成记录不进入 Word。
-  const document = new Document({ ...WORD_METADATA, title: materials.title,
+  const document = new Document({ ...WORD_METADATA, title: content.title,
     styles: WORD_STYLES, sections: [
-      patentSection('说 明 书 摘 要', [wordTitle(materials.title), ...paragraphs(materials.abstract)]),
-      patentSection('权 利 要 求 书', [wordTitle(materials.title), ...materials.claims.flatMap(claim => paragraphs(claim))]),
+      patentSection('说 明 书 摘 要', [wordTitle(content.title), ...paragraphs(content.abstract)]),
+      patentSection('权 利 要 求 书', [wordTitle(content.title), ...content.claims.flatMap(claim => paragraphs(claim))]),
       patentSection('说 明 书', specification), patentSection('说 明 书 附 图', figures),
     ] });
   return packPatentWord(document);

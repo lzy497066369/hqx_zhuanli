@@ -1,12 +1,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
-import App from "./App.tsx";
 import { AuthGate } from './features/auth/AuthGate';
-import { WorkspaceGate } from './features/workspaces/WorkspaceGate';
+import { SessionWorkspace } from './features/admin/SessionWorkspace';
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <AuthGate>{user => <WorkspaceGate user={user}>{(manager, workspaceName) => <App user={user} workspaceManager={manager} workspaceName={workspaceName} />}</WorkspaceGate>}</AuthGate>
+    <AuthGate>{user => <SessionWorkspace user={user} />}</AuthGate>
   </StrictMode>,
 );

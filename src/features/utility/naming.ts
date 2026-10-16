@@ -1,5 +1,7 @@
 import { isStructureEvidenceOption, isStructureEvidenceSelection } from './structureEvidence.ts';
 import type { StructureEvidenceOption, StructureEvidenceSelection } from './structureEvidence.ts';
+import { isProblemProposal, isProblemSelection } from '../product/productProblems.ts';
+import type { ProblemProposal, ProblemSelection } from '../product/productProblems.ts';
 
 /** Naming input and response validation. No company lookup or novelty assessment. */
 export type CompanyProfile = {
@@ -30,6 +32,9 @@ export type NamingRecord = {
   confirmed: boolean;
   structureOptions?: StructureEvidenceOption[];
   structureSelection?: StructureEvidenceSelection;
+  problemProposal?: ProblemProposal;
+  problemSelection?: ProblemSelection;
+  problemContext?: string;
 };
 export const emptyProfile: CompanyProfile = {
   company: "",
@@ -256,6 +261,13 @@ export function isNamingRecord(value: unknown): value is NamingRecord {
     (v.options === undefined || (Array.isArray(v.options) && v.options.length <= 10 && v.options.every((option: { product?: unknown; features?: unknown }) => option && typeof option.product === 'string' && Array.isArray(option.features) && option.features.length <= 8 && option.features.every(feature => typeof feature === 'string')))) &&
     (v.structureOptions === undefined || (Array.isArray(v.structureOptions) && v.structureOptions.length <= 30 && v.structureOptions.every(isStructureEvidenceOption) && new Set(v.structureOptions.map(option => option.id)).size === v.structureOptions.length)) &&
     (v.structureSelection === undefined || isStructureEvidenceSelection(v.structureSelection)) &&
+    (v.problemProposal === undefined || (isProblemProposal(v.problemProposal) && v.problemProposal.product === p.product)) &&
+    (v.problemContext === undefined || (typeof v.problemContext === 'string' && v.problemContext.length <= 3000)) &&
+    (v.problemSelection === undefined || (isProblemSelection(v.problemSelection) && v.problemSelection.product === p.product &&
+      v.problemSelection.problem.suggestedName === v.selectedName && (!v.problemProposal || (
+        (v.problemProposal as ProblemProposal).scenario === v.problemSelection.scenario &&
+        (v.problemProposal as ProblemProposal).context === v.problemSelection.context &&
+        (v.problemProposal as ProblemProposal).problems.some(item => JSON.stringify(item) === JSON.stringify(v.problemSelection && (v.problemSelection as ProblemSelection).problem)))))) &&
     v.candidates.length <= 9 &&
     v.candidates.every(
       (c) =>

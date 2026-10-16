@@ -58,7 +58,7 @@ test("集成：新建、持久化、搜索、编辑、导出、归档及删除�
   await page.getByRole("button", { name: "关闭弹窗" }).click();
   await page.reload();
   await page.getByRole("textbox", { name: "搜索项目" }).fill("测试协同平台");
-  await expect(page).toHaveURL(/#projects$/);
+  await expect(page).toHaveURL(/#projects\/all$/);
   await expect(page.locator("tbody tr")).toHaveCount(1);
   await page.locator(".project-name").click();
   await expect(page.getByRole("dialog")).toContainText("测试协同平台 V3.0");
@@ -81,35 +81,21 @@ test("集成：四类模板、筛选、搜索空态与文件信息", async ({ pa
     "software",
   ].entries()) {
     await page.getByRole("button", { name: "使用此模板" }).nth(index).click();
-    if (id === "utility") {
-      await expect(page).toHaveURL(/#utility$/);
-      await expect(
-        page.getByRole("heading", { name: "好专利，从一个准确的名字开始" }),
-      ).toBeVisible();
-      await page.getByRole("link", { name: /模板中心/ }).click();
-      continue;
-    }
-    if (id === "invention") {
-      await expect(page).toHaveURL(/#invention\//);
-      await expect(page.locator(".un-steps")).toBeVisible();
-      await expect(page.locator(".invention-workflow")).toHaveCount(0);
-      await expect(page.getByText("解决的技术问题", { exact: true })).toHaveCount(0);
-      await page.goto("/#templates");
-      continue;
-    }
     await expect(page.getByLabel("知识产权类型")).toHaveValue(id);
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).toHaveCount(0);
   }
   await page.getByRole("link", { name: /项目管理/ }).click();
+  await page.getByRole("button", { name: /^全部专利/ }).click();
   await page.getByRole("button", { name: "草稿", exact: true }).click();
-  await expect(page.locator("tbody tr")).toHaveCount(3);
+  await expect(page.locator("tbody tr")).toHaveCount(2);
+  await page.getByRole("button", { name: "全部项目", exact: true }).click();
   await page.getByLabel("按知识产权类型筛选").selectOption("design");
   await expect(page.locator("tbody tr")).toHaveCount(1);
   await page.getByRole("textbox", { name: "搜索项目" }).fill("不存在的项目");
   await expect(page.getByText("没有找到相关项目")).toBeVisible();
   await page.getByRole("button", { name: "清除筛选" }).click();
-  await expect(page.locator("tbody tr")).toHaveCount(5);
+  await expect(page.locator("tbody tr")).toHaveCount(4);
   await page.getByRole("link", { name: "资料库" }).click();
   await page.locator("input[type=file]").setInputFiles({
     name: "技术说明.txt",
@@ -125,6 +111,7 @@ test("系统：输入校验、未保存提醒和对话框键盘焦点", async ({
   await page.goto("/");
   await page.getByRole("button", { name: "新建项目", exact: true }).click();
   await expect(page.getByLabel("项目名称")).toBeFocused();
+  await page.getByLabel("知识产权类型", { exact: true }).selectOption("software");
   await page.getByLabel("项目名称").fill("   ");
   await page.getByRole("button", { name: "保存并预览" }).click();
   await expect(page.getByRole("alert")).toHaveText(
@@ -153,6 +140,7 @@ for (const size of [
     await page.setViewportSize(size);
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/");
+    await expect(page.locator('.category-card')).toHaveCount(4);
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
@@ -235,6 +223,7 @@ test("系统：存储不可用时显示恢复提示，长名称不撑破手机�
   await page.goto("/");
   await expect(page.getByRole("status")).toContainText("浏览器存储不可用");
   await page.getByRole("button", { name: "新建项目", exact: true }).click();
+  await page.getByLabel("知识产权类型", { exact: true }).selectOption("software");
   await page.getByLabel("项目名称").fill("A".repeat(100));
   await page.getByRole("button", { name: "保存并预览" }).click();
   await page.getByRole("button", { name: "关闭弹窗" }).click();

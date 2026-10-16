@@ -8,6 +8,9 @@ import { GEOMETRY_HELP, GEOMETRY_FORMAT } from '../src/features/utility/contentD
 import { AiFailure, STRICT_E2E_POLICY, AI_USER_AGENT, aiProviders, availableProviders, markProviderFailed, markProviderSucceeded, responseText, shouldCoolDownProvider } from './aiSupport.ts';
 import type { AiConfig } from './aiSupport.ts';
 import { createProductWorkflowService, PRODUCT_PATHS } from './productWorkflowAi.ts';
+import { withTokenUsage } from './aiUsage.ts';
+import { auditedFetch, markAiResponseFailure } from './aiAudit.ts';
+import type { TokenUsage } from '../src/features/product/tokenUsage.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { GenerationQueue } from './generationQueue.ts';
 import { requestContext } from './requestContext.ts';
@@ -49,6 +52,7 @@ export function readAiConfig(env: Record<string, string | undefined>): AiConfig 
   if (env.AI_RESEARCH_PROTOCOL && !['responses', 'anthropic'].includes(env.AI_RESEARCH_PROTOCOL)) throw new AiFailure(503, 'AI_NOT_CONFIGURED', 'Research 协议必须为 responses 或 anthropic。');
   return {
     ...(env.AI_EXECUTION_POLICY === 'strict-e2e' ? { executionPolicy: STRICT_E2E_POLICY } : {}),
+    ...(env.CAD_CHECKPOINT_DIR ? { cadCheckpointDir: env.CAD_CHECKPOINT_DIR } : {}),
     ...(env.AI_WORKFLOW_SIGNING_KEY ? { workflowSigningKey: env.AI_WORKFLOW_SIGNING_KEY } : {}),
     ...(env.AI_IMAGE_BASE_URL || env.AI_IMAGE_API_KEY || env.AI_IMAGE_MODEL ? { image: {
       baseUrl: (env.AI_IMAGE_BASE_URL || '').replace(/\/+$/, ''), apiKey: env.AI_IMAGE_API_KEY || '', model: env.AI_IMAGE_MODEL || '',
@@ -101,6 +105,7 @@ export async function generateDrawingPlan(input: DrawingPlanInput, config: AiCon
     const candidates = availableProviders(aiProviders(config));
     let lastError: unknown;
     for (const provider of candidates) {
+      let auditResponse: Response | undefined;
       try {
         const response = await fetcher(`${provider.baseUrl}/chat/completions`, {
           method: 'POST', redirect: 'error', signal: combined,
@@ -108,8 +113,9 @@ export async function generateDrawingPlan(input: DrawingPlanInput, config: AiCon
           body: JSON.stringify({ model: provider.model, stream: false, max_completion_tokens: input.mode === 'concept' ? 3000 : 6000,
             messages: [{ role: 'system', content: input.mode === 'concept' ? CONCEPT_PROMPT : SYSTEM_PROMPT }, { role: 'user', content: JSON.stringify(research ? { input, research } : input) }] }),
         });
+        auditResponse = response;
         if (!response.ok) {
-          await response.body?.cancel().catch(() => {});
+          await responseText(response, 16 * 1024, combined).catch(() => '');
           if (response.status === 401 || response.status === 403) throw new AiFailure(502, 'AI_AUTH', 'AI 服务拒绝授权，请检查服务端密钥及模型权限。');
           if (response.status === 429) throw new AiFailure(429, 'AI_RATE_LIMIT', 'AI 服务额度不足或请求过于频繁，请检查额度或稍后重试。');
           throw new AiFailure(502, 'AI_UPSTREAM', 'AI 服务调用失败，请检查服务状态、模型配置或稍后重试。');
@@ -124,6 +130,7 @@ export async function generateDrawingPlan(input: DrawingPlanInput, config: AiCon
         markProviderSucceeded(provider);
         return { plan, ...(research ? { research } : {}), source: planSource(input), model: provider.model, generatedAt: new Date().toISOString() };
       } catch (error) {
+        await markAiResponseFailure(auditResponse, error);
         lastError = error;
         if (signal.aborted) throw error;
         if (timeout.aborted) throw error;
@@ -190,6 +197,7 @@ function allowedLocalRequest(req: IncomingMessage) {
   } catch { return false; }
 }
 export function createAiMiddleware(config: AiConfig, fetcher: typeof fetch = fetch) {
+  fetcher = auditedFetch(fetcher);
   const queue = new GenerationQueue();
   const expiryTimer = setInterval(() => queue.expire(), 30000);
   expiryTimer.unref();
@@ -221,7 +229,19 @@ export function createAiMiddleware(config: AiConfig, fetcher: typeof fetch = fet
       if (!res.headersSent) res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Accel-Buffering': 'no' });
       if (!res.destroyed && !res.writableEnded) res.write(`${JSON.stringify({ type: 'progress', step: { label, detail } })}\n`);
     } : undefined;
+    const tokenUsage: TokenUsage[] = [];
+    const reportUsage = (usage: TokenUsage) => {
+      tokenUsage.push(usage);
+      if (streaming && !res.destroyed && !res.writableEnded) {
+        if (!res.headersSent) progress?.('统计用量', '正在记录本次模型用量');
+        res.write(`${JSON.stringify({ type: 'usage', usage })}\n`);
+      }
+    };
+    const usageHeader = () => {
+      if (!streaming && tokenUsage.length && !res.headersSent) res.setHeader('X-AI-Token-Usage', encodeURIComponent(JSON.stringify(tokenUsage)));
+    };
     const finish = (data: unknown) => {
+      usageHeader();
       if (streaming) {
         if (!res.headersSent) progress?.('完成请求', '正在返回结果');
         if (!res.destroyed && !res.writableEnded) res.end(`${JSON.stringify({ type: 'result', data })}\n`);
@@ -229,7 +249,7 @@ export function createAiMiddleware(config: AiConfig, fetcher: typeof fetch = fet
     };
     const waitForSlot = async (signal: AbortSignal, report = progress) => {
       let position = 0;
-      const update = () => report?.('排队等待', `当前排队第 ${position} 位，系统最多同时生成 10 份专利。`);
+      const update = () => report?.('排队等待', `当前排队第 ${position} 位，系统最多同时生成 ${queue.limit} 份专利。`);
       const pending = queue.acquire(signal, value => { position = value; update(); });
       queueTimer = setInterval(() => { queue.expire(); if (position) update(); }, 15000);
       try { return await pending; } finally { clearInterval(queueTimer); queueTimer = undefined; }
@@ -249,7 +269,7 @@ export function createAiMiddleware(config: AiConfig, fetcher: typeof fetch = fet
         if (path === '/api/generation/begin') {
           // Reserve before returning the token, so a new generation cannot jump the FIFO queue.
           let position = 0;
-          const update = () => progress?.('排队等待', `当前排队第 ${position} 位，系统最多同时生成 10 份专利。`);
+          const update = () => progress?.('排队等待', `当前排队第 ${position} 位，系统最多同时生成 ${queue.limit} 份专利。`);
           queueTimer = setInterval(() => { queue.expire(); if (position) update(); }, 15000);
           const granted = await queue.begin(owner, controller.signal, value => { position = value; update(); });
           if (controller.signal.aborted) { queue.end(granted, owner); controller.signal.throwIfAborted(); }
@@ -262,7 +282,7 @@ export function createAiMiddleware(config: AiConfig, fetcher: typeof fetch = fet
         return;
       }
       // CAD 阶段要上传四张彩色预览给视觉模型，请求体上限单独放宽。
-      const body = await readBody(req, path === AI_PATH ? 64 * 1024 : path === PRODUCT_PATHS.cad ? 48 * 1024 * 1024 : 3 * 1024 * 1024);
+      const body = await readBody(req, path === AI_PATH ? 64 * 1024 : path === PRODUCT_PATHS.cad ? 48 * 1024 * 1024 : path === PRODUCT_PATHS.materials ? 12 * 1024 * 1024 : 3 * 1024 * 1024);
       if (path === AI_PATH && !isPlanInput(body)) throw new AiFailure(400, 'INVALID_INPUT', '请提供有效的专利名称；产品方案模式不需要预先填写结构和原理。');
 
       // Handle Materials V2 API
@@ -302,7 +322,7 @@ export function createAiMiddleware(config: AiConfig, fetcher: typeof fetch = fet
       controller.signal.throwIfAborted();
       // 先记录终态并等其落盘，再发出响应：诊断日志按 requestId 回溯一次请求的完整
       // 时间线，若终态记录还在写入队列里就返回，调用方立刻读文件会读不到它。
-      const result = productRequest ? await productService(path, body, controller.signal, progress)
+      const result = productRequest ? await withTokenUsage(reportUsage, () => productService(path, body, controller.signal, progress))
         : path === NAMING_OPTIONS_PATH ? await generateNamingOptions(body, config, controller.signal, fetcher, progress)
         : path === NAMING_NAMES_PATH ? await generateNamingNames(body, config, controller.signal, fetcher, progress)
         : path === STRUCTURE_EVIDENCE_PATH ? await generateStructureEvidenceOptions(body, config, controller.signal, fetcher, progress)
@@ -315,13 +335,18 @@ export function createAiMiddleware(config: AiConfig, fetcher: typeof fetch = fet
       if (requestId) { recordStructureLog({ requestId, stage: 'request', httpStatus: 200, elapsedMs: Date.now() - startedAt, outcome: 'completed' }); await flushStructureLog(); }
       if (path === STRUCTURE_ANSWERS_PATH || path === AI_PATH) send(res, 200, result); else finish(result);
     } catch (error) {
-      if (token && !generationRequest && (leaveStep || controller.signal.aborted)) queue.end(token, owner);
       const failure = error instanceof AiFailure ? error : new AiFailure(500, 'SERVER_ERROR', '生成服务暂时不可用，请稍后重试。');
+      // The final review hands findings back to the browser, which continues
+      // with CAD repair under the same generation token. Only release the step;
+      // the browser ends the generation if its repair allowance is exhausted.
+      const continuesDrawingRepair = path === PRODUCT_PATHS.materials && failure.code === 'CAD_VISUAL_MISMATCH' && !controller.signal.aborted;
+      if (token && !generationRequest && (leaveStep || controller.signal.aborted) && !continuesDrawingRepair) queue.end(token, owner);
       // 每个失败的接口响应都留一行：以前容器日志里只有启动行，用户报错时无从回溯是哪个接口、什么错误码。
       // 只记路径、状态码、错误码和耗时，不记请求内容。
       console.warn('api failure', { path, status: failure.status, code: failure.code, elapsedMs: Date.now() - startedAt, aborted: controller.signal.aborted, ...(error instanceof AiFailure ? {} : { error: error instanceof Error ? `${error.name}: ${error.message}`.slice(0, 200) : String(error).slice(0, 200) }) });
       if (requestId) { recordStructureLog({ requestId, stage: 'request', httpStatus: failure.status, elapsedMs: Date.now() - startedAt, outcome: controller.signal.aborted ? 'aborted' : failure.code }); await flushStructureLog(); }
       const details = failure.details.length ? { details: failure.details } : {};
+      usageHeader();
       if (streaming && res.headersSent) {
         if (!res.destroyed && !res.writableEnded) res.end(`${JSON.stringify({ type: 'error', error: { code: failure.code, message: failure.message, ...details } })}\n`);
       } else send(res, failure.status, { error: { code: failure.code, message: failure.message, ...details } });

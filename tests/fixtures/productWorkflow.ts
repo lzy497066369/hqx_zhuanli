@@ -6,11 +6,11 @@ import { signProductArtifact } from '../../server/productProof';
 import { LOGIC_DIMENSIONS, PREVIEW_VIEWS, createProductWorkflow, renderProductDescription } from '../../src/features/product/productWorkflow';
 import type { LogicResult, ProductBrief, ProductCad, ProductDesign, ProductImage, ProductMaterials, ProductPreview, ProductReview, ProductWorkflow } from '../../src/features/product/productWorkflow';
 import { buildPatentFigurePrompt, buildPreviewPrompt } from '../../src/features/product/productPrompts';
-import { meshDigest } from '../../server/meshFigure';
+import { renderMeshView, meshDigest } from '../../server/meshFigure';
 import type { Mesh } from '../../server/meshFigure';
 import { renderCadViews } from '../../server/productCad';
 
-export const productConfig: AiConfig = { baseUrl: 'https://text.example/v1', apiKey: 'text-test-secret', model: 'text-test-model',
+export const productConfig: AiConfig = { cadCheckpointDir: false, baseUrl: 'https://text.example/v1', apiKey: 'text-test-secret', model: 'text-test-model',
   image: { baseUrl: 'https://image.example/v1', apiKey: 'image-test-secret', model: 'image-test-model' } };
 export const productTitle = '一种带滑槽锁紧结构的光伏组件安装支架';
 const when = '2026-10-09T08:00:00.000Z';
@@ -108,3 +108,19 @@ export function makeWorkflow(complete = false, figures: 'cad' | 'image' = 'cad')
   return workflow;
 }
 export const jsonEnvelope = (value: unknown) => new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(value) } }] }), { headers: { 'Content-Type': 'application/json' } });
+
+export const testDrawingPlan = { version: 1 as const, anchors: [], figures: [
+  { id: 'figure-1', title: '整体结构示意图', kind: 'overall' as const, purpose: '整体部件装配', direction: [1,-.75,.55] as [number,number,number], up: [0,0,1] as [number,number,number], marks: ['1','2','3'] },
+  { id: 'figure-2', title: '正面结构示意图', kind: 'orthographic' as const, purpose: '连接高度', direction: [0,-1,0] as [number,number,number], up: [0,0,1] as [number,number,number], marks: ['1','2','3'] },
+] };
+export function makeVerifiedCad(brief = makeBrief()): ProductCad {
+  const mesh: Mesh = { vertices: [...testAssemblyMesh.vertices, ...testMesh.vertices.map(v => [57+v[0]/20,27+v[1]/10,60+v[2]/10] as [number,number,number])],
+    triangles: [...testAssemblyMesh.triangles, ...testMesh.triangles.map(t => t.map(n=>n+16) as [number,number,number])], parts: [...testAssemblyMesh.parts!, ...Array<string>(12).fill('3')] };
+  const views = testDrawingPlan.figures.map(f => {
+    const result=renderMeshView(mesh,{direction:f.direction,up:f.up,partLabels:true,forceLabelParts:f.marks,requiredLabels:f.marks});
+    return {view:f.id,title:f.title,svg:result.svg,width:result.width,height:result.height,annotations:result.annotations,digest:createHash('sha256').update(result.svg).digest('hex')};
+  });
+  return signProductArtifact('cad',{id:`cad-${brief.id}`,briefId:brief.id,script:testCadScript,summary:'明确模拟的完整标号附图。',assumptions:[],labels:[...testCadLabels,{number:'3',name:'锁紧螺栓',point:[60,30,62] as [number,number,number]}],
+    drawingVersion:1 as const,drawingPlan:testDrawingPlan,visualReview:{status:'passed' as const,summary:'测试模拟核对通过。',figureIds:views.map(v=>v.view)},
+    meshDigest:meshDigest(mesh),vertexCount:mesh.vertices.length,triangleCount:mesh.triangles.length,freecadVersion:'test',views,createdAt:when},productConfig);
+}

@@ -7,18 +7,22 @@ export function Modal({
   children,
   onClose,
   wide = false,
+  open = true,
+  className = '',
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
+  open?: boolean;
+  className?: string;
 }) {
   const titleId = useId();
   const ref = useRef<HTMLDialogElement>(null);
-  const returnFocus = useRef(document.activeElement as HTMLElement);
   useEffect(() => {
+    if (!open) return;
     const dialog = ref.current!;
-    const previous = returnFocus.current;
+    const previous = document.activeElement as HTMLElement;
     dialog.showModal();
     dialog.querySelector<HTMLElement>("[data-autofocus]")?.focus();
     return () => {
@@ -26,11 +30,11 @@ export function Modal({
       if (previous?.isConnected) previous.focus();
       else document.querySelector<HTMLElement>("main")?.focus();
     };
-  }, []);
+  }, [open]);
   return (
     <dialog
       ref={ref}
-      className={`modal ${wide ? "wide" : ""}`}
+      className={`modal ${wide ? "wide" : ""} ${className}`}
       onCancel={(e) => {
         e.preventDefault();
         onClose();

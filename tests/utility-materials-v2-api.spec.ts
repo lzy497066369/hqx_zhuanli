@@ -62,9 +62,9 @@ test('V2 API：拒绝无效的双向证据引用', async () => {
   expect(response.body.message).toContain('证据关联无效');
 });
 
-test('V2 后台任务：返回 taskId 后仍排队，占用名额直到后台任务结束', async () => {
+test('V2 后台任务：50 个名额占满后返回 taskId 并排队，占用名额直到后台任务结束', async () => {
   const queue = new GenerationQueue();
-  const tokens = await Promise.all(Array.from({ length: 10 }, () => queue.begin('owner', new AbortController().signal)));
+  const tokens = await Promise.all(Array.from({ length: 50 }, () => queue.begin('owner', new AbortController().signal)));
   let fail!: () => void;
   const background = new Promise<void>((_resolve, reject) => { fail = () => reject(new Error('测试后台任务终止')); });
   let started = false;

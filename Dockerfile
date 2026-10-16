@@ -16,12 +16,14 @@ RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 instal
     && rm -rf /var/lib/apt/lists/* && mkdir -p /tmp/freecad-home
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+ARG NPM_REGISTRY=https://registry.npmjs.org
+RUN npm ci --omit=dev --registry=$NPM_REGISTRY
 COPY server ./server
 # API 使用 src 内的共享业务模型；这些源码不会作为静态文件暴露。
 COPY src ./src
 # 以非 root 运行；FreeCAD 临时目录位于 /tmp，由应用用后即删。
-RUN useradd --system --create-home --shell /usr/sbin/nologin zhichuang && chown -R zhichuang:zhichuang /app /tmp/freecad-home
+RUN useradd --system --create-home --shell /usr/sbin/nologin zhichuang && mkdir -p /home/zhichuang/.local/state/zhichuang-workshop/cad-checkpoints \
+    && chown -R zhichuang:zhichuang /app /tmp/freecad-home /home/zhichuang
 USER zhichuang
 EXPOSE 4173
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD node -e "fetch('http://127.0.0.1:4173/api/storage/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

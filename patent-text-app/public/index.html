@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>专利文本工作台</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+  <header><h1>专利文本工作台</h1><span id="connection">正在连接服务…</span></header>
+  <p class="intro">输入产品名称，选择一个要解决的问题，自动生成结构方案和实用新型申请草稿。</p>
+  <form id="product-form">
+    <label for="product">产品名称</label>
+    <div class="input-row"><input id="product" name="product" maxlength="80" placeholder="例如：闸门、收纳箱、夹具" required autocomplete="off"><button id="propose" type="submit">生成待解决的问题</button></div>
+  </form>
+  <p id="message" role="status" aria-live="polite"></p>
+  <section id="choices" hidden>
+    <h2>选择一个改进方向</h2>
+    <p id="scenario"></p>
+    <div id="problem-list" role="radiogroup" aria-label="待解决的问题"></div>
+    <button id="generate" disabled>按选定问题生成完整文本</button>
+  </section>
+  <section id="job-section" hidden>
+    <div class="section-top"><h2 id="job-title">生成进度</h2><div class="actions"><button id="cancel" class="secondary" hidden>停止生成</button><button id="retry" hidden>重试并继续</button></div></div>
+    <p id="job-context"></p>
+    <ol id="stages"></ol>
+    <p id="activity" role="status" aria-live="polite"></p>
+    <p id="job-error" class="error" role="alert" hidden></p>
+    <details id="events"><summary>查看生成记录</summary><div id="event-list"></div></details>
+  </section>
+  <section id="results" hidden>
+    <div class="section-top"><h2>生成结果</h2><div class="actions"><button id="copy" class="secondary">复制正文</button><a id="download-text" class="button" href="#">下载文本</a><a id="download-json" class="button secondary" href="#">下载方案数据</a></div></div>
+    <p class="notice">本次结果为系统提出的设计及申请草稿。此版本仅生成文本，未生成附图，未做专利检索或工程验证。</p>
+    <div class="tabs" role="tablist" aria-label="结果内容">
+      <button id="tab-text" role="tab" aria-selected="true" aria-controls="panel-text" data-tab="text">专利文本</button>
+      <button id="tab-plan" role="tab" aria-selected="false" aria-controls="panel-plan" data-tab="plan">部件与结构</button>
+      <button id="tab-scope" role="tab" aria-selected="false" aria-controls="panel-scope" data-tab="scope">保护方案</button>
+      <button id="tab-notes" role="tab" aria-selected="false" aria-controls="panel-notes" data-tab="notes">设计记录</button>
+      <button id="tab-review" role="tab" aria-selected="false" aria-controls="panel-review" data-tab="review">检查与修正</button>
+    </div>
+    <div id="panel-text" role="tabpanel" aria-labelledby="tab-text"><pre id="document"></pre></div>
+    <div id="panel-plan" role="tabpanel" aria-labelledby="tab-plan" hidden></div>
+    <div id="panel-scope" role="tabpanel" aria-labelledby="tab-scope" hidden></div>
+    <div id="panel-notes" role="tabpanel" aria-labelledby="tab-notes" hidden></div>
+    <div id="panel-review" role="tabpanel" aria-labelledby="tab-review" hidden></div>
+  </section>
+  <section id="history-section" hidden><label for="history">本地历史记录</label><select id="history"><option value="">选择已生成的任务</option></select></section>
+  <footer>文本与结构方案自动保存在本机，可刷新页面后继续查看。</footer>
+</main>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

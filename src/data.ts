@@ -149,6 +149,10 @@ export type Project = {
   category: CategoryId;
   description: string;
   owner: string;
+  companyId?: string;
+  /** 用户输入的基础产品名，独立于生成的专利名称。 */
+  baseProductName?: string;
+  filingStatus?: 'not_submitted' | 'in_progress' | 'completed';
   status: "draft" | "ready";
   updatedAt: string;
   demo?: boolean;
@@ -401,6 +405,10 @@ export function sanitizeProjects(value: unknown): Project[] {
     )
     .map((p) => ({
       ...p,
+      companyId: typeof p.companyId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(p.companyId) ? p.companyId : undefined,
+      baseProductName: typeof p.baseProductName === 'string' ? p.baseProductName.trim().slice(0, 100) : undefined,
+      filingStatus: typeof p.filingStatus === 'string' && ['not_submitted', 'in_progress', 'completed'].includes(p.filingStatus)
+        ? p.filingStatus as Project['filingStatus'] : undefined,
       naming: isNamingRecord(p.naming) ? p.naming : undefined,
       productWorkflow: isProductWorkflow(p.productWorkflow) ? p.productWorkflow : undefined,
       utilityDrawing: isUtilityDrawing(p.utilityDrawing)

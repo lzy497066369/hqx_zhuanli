@@ -2,13 +2,19 @@ import { Document, Paragraph, TextRun } from 'docx';
 import type { Project } from '../../data';
 import { packPatentWord, patentSection, WORD_BODY, WORD_BODY_PARAGRAPH, WORD_METADATA, WORD_STYLES, wordHeading, wordTitle } from '../utility/wordFormat';
 import { validateInventionMaterials } from './invention';
+import type { PatentExportDocument } from '../export/patentDocument';
 
 const body = (text: string) => new Paragraph({ ...WORD_BODY_PARAGRAPH, children: [new TextRun({ text, ...WORD_BODY })] });
 
-export async function createInventionWordBlob(project: Project) {
+export function prepareInventionPatentExport(project: Project): PatentExportDocument {
   if (project.category !== 'invention') throw new Error('不是发明专利项目。');
   const { inventionFacts: facts, inventionMaterials: materials } = project;
   validateInventionMaterials(project.name, facts, materials);
+  return { title: project.name, abstract: materials!.abstract, claims: materials!.claims, sections: materials!.sections, figures: [] };
+}
+
+export async function createInventionWordBlob(project: Project) {
+  const materials = prepareInventionPatentExport(project);
   const specification = [wordTitle(project.name)];
   for (const section of materials!.sections) specification.push(wordHeading(section.title), ...section.paragraphs.map(body));
   const document = new Document({

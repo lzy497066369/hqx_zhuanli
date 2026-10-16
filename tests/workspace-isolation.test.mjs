@@ -47,12 +47,18 @@ test('real MySQL: multiple private workspaces, cross-account denial, CRUD and ca
     assert.equal((await request('/api/generation/end',a.cookie,first,'POST',{},tokenHeader)).status,200);
     assert.equal((await request('/api/storage/projects',a.cookie)).status,400);
     assert.equal((await request('/api/storage/projects',a.cookie,config.workspace)).status,404);
-    for (const path of ['/api/storage/projects','/api/storage/materials','/api/storage/naming-drafts/new','/api/product/review','/api/generation/begin']) {
+    for (const path of ['/api/storage/companies','/api/storage/projects','/api/storage/materials','/api/storage/naming-drafts/new','/api/product/review','/api/generation/begin']) {
       assert.equal((await request(path,b.cookie,first)).status,404);
     }
     for (const method of ['PATCH','DELETE']) assert.equal((await request(`/api/workspaces/${first}`,b.cookie,undefined,method,{name:'窃取',confirmName:'我的工作空间'})).status,404);
     const project = {id:'same-id',name:'A空间项目',category:'software',owner:'账号A',description:'保密内容',status:'draft',updatedAt:new Date().toISOString()};
     assert.equal((await request('/api/storage/projects',a.cookie,first,'PUT',{revision:0,projects:[project]})).status,200);
+    const company = { id:'company-a', name:'A企业', mainProducts:['闸门'], updatedAt:new Date().toISOString() };
+    assert.equal((await request('/api/storage/companies',a.cookie,first,'PUT',{revision:0,companies:[company]})).status,200);
+    assert.deepEqual((await request('/api/storage/companies',a.cookie,second)).data.companies,[]);
+    assert.deepEqual((await request('/api/storage/companies',b.cookie,foreign)).data.companies,[]);
+    assert.equal((await request('/api/storage/companies',b.cookie,first,'PUT',{revision:1,companies:[]})).status,404);
+    assert.deepEqual((await request('/api/storage/companies',a.cookie,first)).data.companies,[company]);
     assert.deepEqual((await request('/api/storage/projects',a.cookie,second)).data.projects,[]);
     assert.deepEqual((await request('/api/storage/projects',b.cookie,foreign)).data.projects,[]);
     const draft = {version:1,profile:{company:'A企业',business:'',product:'',features:'',excludedTerms:''},candidates:[],selectedName:'',confirmed:false};
@@ -70,7 +76,7 @@ test('real MySQL: multiple private workspaces, cross-account denial, CRUD and ca
     assert.equal(renamed.status,200); assert.equal(renamed.data.workspace.name,'研发空间');
     assert.equal((await request(`/api/workspaces/${first}`,a.cookie,undefined,'DELETE',{confirmName:'错误名称'})).status,400);
     assert.equal((await request(`/api/workspaces/${first}`,a.cookie,undefined,'DELETE',{confirmName:'我的工作空间'})).status,200);
-    for (const table of ['projects','materials','naming_drafts']) {
+    for (const table of ['projects','materials','naming_drafts','company_directories']) {
       const [rows] = await auth.database.pool.execute(`SELECT COUNT(*) AS count FROM ${table} WHERE workspace_id = ?`,[first]);
       assert.equal(rows[0].count,0);
     }

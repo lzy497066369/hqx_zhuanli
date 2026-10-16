@@ -4,9 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "test:admin": "node --experimental-strip-types --env-file-if-exists=.env.local --test tests/admin-api.test.mjs tests/ai-audit.test.mjs && playwright test --config playwright.admin.config.ts",
     "test:auth": "node --experimental-strip-types --env-file-if-exists=.env.local --test tests/auth-api.test.mjs tests/workspace-isolation.test.mjs && playwright test --config playwright.auth.config.ts",
     "db:migrate": "node --experimental-strip-types --env-file-if-exists=.env.local server/mysql/migrate.ts",
     "test:mysql": "node --experimental-strip-types --env-file-if-exists=.env.local --test tests/mysql-storage.test.mjs",
+    "test:generation": "playwright test --config playwright.generation.config.ts",
+    "test:generation:mysql": "node --experimental-strip-types --env-file-if-exists=.env.local --test tests/generation-queue-auth.test.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
@@ -14,14 +17,20 @@
     "test": "playwright test",
     "test:ui": "playwright test --ui",
     "start": "node --experimental-strip-types --env-file-if-exists=.env.local server/index.ts",
+    "test:drawing": "node --experimental-strip-types --test tests/product-drawing.test.mjs",
+    "test:ai-response": "node --experimental-strip-types --test tests/ai-response-lifecycle.test.mjs",
     "test:product": "playwright test --config playwright.product.config.ts",
+    "test:pdf": "playwright test --config playwright.pdf.config.ts",
     "test:product:live": "node --experimental-strip-types --env-file-if-exists=.env.local tests/support/productWorkflowLive.mjs",
     "test:naming:live": "node --experimental-strip-types --env-file-if-exists=.env.local tests/support/namingOneShotLive.mjs"
   },
   "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "docx": "^9.7.1",
     "lucide-react": "^1.47.0",
     "mysql2": "^3.24.5",
+    "pdf-lib": "^1.17.1",
+    "pdfmake": "^0.2.23",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
@@ -29,10 +38,12 @@
     "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.63.0",
     "@types/node": "^24.13.3",
+    "@types/pdfmake": "^0.2.12",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
     "oxlint": "^1.81.0",
+    "pdfjs-dist": "^6.4.299",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"
   }

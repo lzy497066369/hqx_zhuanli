@@ -32,6 +32,15 @@ CREATE TABLE IF NOT EXISTS projects (
   CONSTRAINT fk_projects_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE IF NOT EXISTS company_directories (
+  workspace_id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  data JSON NOT NULL,
+  revision INT UNSIGNED NOT NULL DEFAULT 1,
+  updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (workspace_id),
+  CONSTRAINT fk_companies_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE IF NOT EXISTS naming_drafts (
   workspace_id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   draft_key VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,

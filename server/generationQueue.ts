@@ -6,7 +6,13 @@ type Transaction = { owner: string; release: () => void; touched: number; runnin
 
 /** FIFO slots belong to a whole generation, including gaps between its HTTP steps. */
 export class GenerationQueue {
-  readonly limit = 10;
+  readonly limit: number;
+
+  constructor(limit = 50) {
+    this.limit = limit;
+    if (!Number.isInteger(limit) || limit < 1) throw new RangeError('Generation queue limit must be a positive integer');
+  }
+
   private active = 0;
   private waiting: Waiter[] = [];
   private transactions = new Map<string, Transaction>();

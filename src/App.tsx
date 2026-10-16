@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import {
   ArrowDownToLine,
+  ArrowLeft,
   ArrowRight,
   Bell,
   BookOpen,
@@ -35,7 +36,11 @@ import {
   hasConfirmedUtilityStructure,
 } from "./data";
 import type { CategoryId, Project } from "./data";
-import { deleteNamingDraft, loadProjectsAsync, saveProjectsAsync } from "./storage/projectStorage";
+import { loadProjectsAsync, saveProjectsAsync } from "./storage/projectStorage";
+import { loadCompaniesAsync, saveCompaniesAsync } from './storage/companyStorage';
+import { CompanyDirectory, CompanyEditor } from './features/projects/CompanyDirectory';
+import { companyForProject, companyNameKey } from './features/projects/company';
+import type { Company } from './features/projects/company';
 import { loadMaterialsAsync, saveMaterialsAsync } from './storage/materialStorage';
 import type { Material } from './storage/materialStorage';
 import { getStorageDriver, storageError } from './storage/storageApi';
@@ -46,24 +51,25 @@ import { ProductWorkflowWorkspace } from './features/product/ProductWorkflowWork
 import { ProjectGenerationProgress } from './features/product/ProjectGenerationProgress';
 import { createProductWorkflow, isProductWorkflowComplete, namingFingerprint } from './features/product/productWorkflow';
 import type { ProductWorkflow } from './features/product/productWorkflow';
-import { createProductWordBlob, productWordFilename } from './features/product/productWordExport';
-import { createUtilityWordBlob, utilityWordFilename } from "./features/utility/wordExport";
-import { createInventionWordBlob, inventionWordFilename } from './features/invention/wordExport';
+import { canExportPatent, downloadExport, exportProjectPatent } from './features/export/patentExport';
+import type { PatentExportFormat } from './features/export/patentExport';
 import { validateInventionMaterials } from './features/invention/invention';
 import type { NamingRecord } from "./features/utility/naming";
-import { utilityDraftKey } from "./features/utility/naming";
+import { ProjectEditor } from './features/projects/ProjectEditor';
+import { baseProductName, filingStatuses, isGeneratedPatent } from './features/projects/projectManagement';
+import { FilingStatusButtons } from './features/projects/FilingStatusButtons';
+import type { FilingStatus } from './features/projects/projectManagement';
 import { Modal } from "./components/Modal";
 import "./App.css";
 import { authRequest } from './features/auth/authApi';
 import type { AuthUser } from './features/auth/authApi';
 
-type Page = "dashboard" | "projects" | "materials" | "templates" | "utility" | "invention";
+type Page = "dashboard" | "projects" | "materials" | "templates" | "invention";
 const pages: Record<Page, string> = {
   dashboard: "工作台",
   projects: "项目管理",
   materials: "资料库",
   templates: "模板中心",
-  utility: "实用新型 · 取名字",
   invention: '发明专利 · 申请材料',
 };
 const categoryIcons = {
@@ -74,27 +80,38 @@ const categoryIcons = {
 };
 function getPage(): Page {
   const value = location.hash.slice(1).split("/")[0];
+  if (value === 'utility') return 'projects';
   return Object.hasOwn(pages, value) ? (value as Page) : "dashboard";
 }
 function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser | null; workspaceManager?: ReactNode; workspaceName?: string }) {
   const [page, setPage] = useState<Page>(getPage);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [companyList, setCompanyList] = useState<Company[]>([]);
+  const [companyEditor, setCompanyEditor] = useState<Partial<Company> | null>(null);
+  const [deletingCompany, setDeletingCompany] = useState<Company | null>(null);
+  const [companyScope, setCompanyScope] = useState(() => getPage() === 'projects' ? location.hash.split('/')[1] || '' : '');
+  const directory = page === 'projects' && !companyScope;
+  const selectedCompany = companyList.find(company => company.id === companyScope);
+  const companyDisplayName = (project: Project) => companyForProject(project, companyList)?.name || project.owner;
   const [storageReady, setStorageReady] = useState(false);
   const [storageIssue, setStorageIssue] = useState('');
   const [storageMode, setStorageMode] = useState<'mysql' | 'indexeddb'>('mysql');
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [companyFilter, setCompanyFilter] = useState('all');
+  const [productFilter, setProductFilter] = useState('all');
+  const [filingFilter, setFilingFilter] = useState('all');
   const [mobileNav, setMobileNav] = useState(false);
   const [notifications, setNotifications] = useState(false);
   const [profile, setProfile] = useState(false);
   const [toast, setToast] = useState("");
-  const [utilityProject, setUtilityProject] = useState<Project | undefined>(undefined);
+  const [workflowProjectId, setWorkflowProjectId] = useState<string | null>(null);
   const inventionProject = projects.find(p => p.category === 'invention' && p.id === location.hash.split('/')[1]);
   const [inventionStage, setInventionStage] = useState<"naming" | "workspace">("naming");
-  const [utilityStage, setUtilityStage] = useState<"naming" | "workspace">("naming");
   const [workflowSessions, setWorkflowSessions] = useState<string[]>([]);
-  const activeWorkflowProject = page === 'utility' && utilityStage === 'workspace' ? utilityProject
-    : page === 'invention' && inventionStage === 'workspace' ? inventionProject : undefined;
+  const activeWorkflowProject = projects.find(project => project.id === workflowProjectId)
+    || (page === 'invention' && inventionStage === 'workspace' ? inventionProject : undefined);
   const sessionKey = (project: Project) => `${project.id}:${namingFingerprint(project)}`;
   const activeSession = activeWorkflowProject && (activeWorkflowProject.category === 'utility' || activeWorkflowProject.naming) ? sessionKey(activeWorkflowProject) : undefined;
   useEffect(() => {
@@ -104,20 +121,20 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
     }
   }, [activeSession]);
   const [editor, setEditor] = useState<Partial<Project> | null>(null);
-  const [selectedCategory, setSelectedCategory] =
-    useState<CategoryId>("invention");
   const [preview, setPreview] = useState<Project | null>(null);
+  const [exporting, setExporting] = useState<PatentExportFormat | null>(null);
   const [deleting, setDeleting] = useState<Project | null>(null);
   const [materials, setMaterials] = useState<Material[]>([]);
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
   const upload = useRef<HTMLInputElement>(null);
   const mainRef = useRef<HTMLElement>(null);
   // Load storage before enabling writes; a connection failure cannot overwrite data.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([loadProjectsAsync(), loadMaterialsAsync(), getStorageDriver()]).then(([list, files, mode]) => {
+    Promise.all([loadProjectsAsync().then(async list => ({ list, companies: await loadCompaniesAsync(list) })), loadMaterialsAsync(), getStorageDriver()]).then(([loaded, files, mode]) => {
       if (cancelled) return;
+      let list = loaded.list;
+      setCompanyList(loaded.companies);
+      list = list.map(project => ({ ...project, companyId: project.companyId || companyForProject(project, loaded.companies)?.id }));
       // Requests belong to this browser session; a reload cannot leave a stale running badge.
       list = list.map(project => project.productWorkflow?.generation?.state === 'running' ? {
         ...project, productWorkflow: { ...project.productWorkflow, generation: { ...project.productWorkflow.generation,
@@ -127,9 +144,12 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
       setMaterials(files);
       setStorageMode(mode);
       const hashId = location.hash.split("/")[1];
-      // oxlint-disable-next-line react/set-state-in-effect -- Hydrate navigation state once storage is ready.
-      setUtilityProject(list.find(p => p.category === "utility" && p.id === hashId));
-      if (list.find(p => p.category === 'utility' && p.id === hashId)?.productWorkflow) setUtilityStage('workspace');
+      if (location.hash.startsWith('#utility')) {
+        const target = list.find(project => project.id === hashId && project.category === 'utility');
+        if (target?.productWorkflow) setWorkflowProjectId(target.id);
+        else setEditor(target || { category: 'utility', name: '', owner: '', description: '' });
+        history.replaceState(null, '', '#projects/all'); setCompanyScope('all');
+      }
       if (list.find(p => p.category === "invention" && p.id === hashId)?.naming?.confirmed) {
         // oxlint-disable-next-line react/set-state-in-effect -- Hydrate navigation state once storage is ready.
         setInventionStage("workspace");
@@ -145,15 +165,13 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
     const onHash = () => {
       const next = getPage();
       setPage(next);
-      if (next === "utility") {
-        const id = location.hash.split("/")[1];
-        // A bare utility route starts a new project; never reuse another project's drawing.
-        // Preserve the stage chosen by an in-app action for the same project.
-        if (!id || id !== utilityProject?.id) {
-          const target = projects.find(project => project.category === "utility" && project.id === id);
-          setUtilityProject(target);
-          setUtilityStage(target?.naming?.confirmed ? "workspace" : "naming");
-        }
+      setCompanyScope(next === 'projects' ? location.hash.split('/')[1] || '' : '');
+      setWorkflowProjectId(null);
+      if (location.hash.startsWith('#utility')) {
+        const target = projects.find(project => project.id === location.hash.split('/')[1] && project.category === 'utility');
+        if (target?.productWorkflow) setWorkflowProjectId(target.id);
+        else setEditor(target || { category: 'utility', name: '', owner: '', description: '' });
+        history.replaceState(null, '', '#projects/all'); setCompanyScope('all');
       }
       if (next === "invention") {
         const id = location.hash.split("/")[1];
@@ -164,7 +182,7 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
-  }, [projects, utilityProject?.id, inventionProject?.id]);
+  }, [projects, inventionProject?.id]);
   // Storage is external; a failed write must surface a recoverable notice.
   useEffect(() => {
     if (!storageReady) return;
@@ -175,6 +193,12 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
     });
     return () => { cancelled = true; };
   }, [projects, storageReady]);
+  useEffect(() => {
+    if (!storageReady) return;
+    let cancelled = false;
+    void saveCompaniesAsync(companyList).then(ok => { if (!cancelled && !ok) setStorageIssue(storageError()); });
+    return () => { cancelled = true; };
+  }, [companyList, storageReady]);
   useEffect(() => {
     if (!storageReady) return;
     let cancelled = false;
@@ -193,32 +217,19 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
     location.hash = next;
     setMobileNav(false);
   };
-  const create = (category: CategoryId = "software", name = "") => {
-    if (category === "utility") {
-      setUtilityProject(undefined);
-      setUtilityStage("naming");
-      navigate("utility");
-      return;
-    }
-    if (category === "invention") {
-      const project: Project = {
-        id: newId(),
-        category: "invention",
-        name: name.trim() || "未命名发明专利",
-        owner: "",
-        description: "",
-        status: "draft",
-        updatedAt: new Date().toISOString(),
-      };
-      setProjects((list) => [project, ...list]);
-      setInventionStage("naming");
-      location.hash = `invention/${project.id}`;
-      setToast("已进入发明专利四步创作流程，请先填写企业和真实技术资料");
-      return;
-    }
-    setError("");
-    setSelectedCategory(category);
-    setEditor({ category, name, description: "", owner: "" });
+  const openCompanyScope = (scope = '') => {
+    clearFilters(); setCompanyScope(scope); setPage('projects');
+    // oxlint-disable-next-line react/immutability -- Hash navigation changes the browser route.
+    location.hash = scope ? `projects/${scope}` : 'projects';
+  };
+  const saveCompany = (company: Company) => {
+    setCompanyList(current => [company, ...current.filter(item => item.id !== company.id)]);
+    setCompanyEditor(null); openCompanyScope();
+    setToast(companyEditor?.id ? '企业资料已更新' : '企业已创建，点击企业进入专利管理');
+  };
+  const create = (category: CategoryId = 'utility', name = '') => {
+    setEditor({ category, name, owner: selectedCompany?.name || '', companyId: selectedCompany?.id,
+      baseProductName: selectedCompany?.mainProducts.length === 1 ? selectedCompany.mainProducts[0] : '', description: '' });
   };
   const saveInventionName = (naming: NamingRecord) => {
     if (!inventionProject) return;
@@ -235,160 +246,106 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
     setInventionStage("workspace");
     setToast("名称已确认，正在保存并进入产品创作流程");
   };
-  const saveUtilityName = (naming: NamingRecord) => {
-    const id = utilityProject?.id || newId();
-    const project: Project = {
-      id,
-      category: "utility",
-      name: naming.selectedName,
-      owner: naming.profile.company.trim(),
-      description: `产品名称：${naming.profile.business.trim()}\n保护客体：${naming.profile.product.trim() || "参见确认名称"}\n结构特征：${naming.profile.features.trim() || "参见确认名称，需在后续技术方案中展开"}`,
-      status: "draft",
-      updatedAt: new Date().toISOString(),
-      naming,
-      utilityDrawing: utilityProject?.utilityDrawing,
-      utilityMaterials: utilityProject?.name === naming.selectedName &&
-        JSON.stringify(utilityProject.naming?.profile) === JSON.stringify(naming.profile)
-        ? utilityProject.utilityMaterials : undefined,
-    };
-    project.productWorkflow = utilityProject?.productWorkflow?.sourceFingerprint === namingFingerprint(project) ? utilityProject.productWorkflow : createProductWorkflow(project);
-    setProjects((list) => [
-      project,
-      ...list.filter((p) => p.id !== project.id),
-    ]);
-    setUtilityProject(project);
-    setUtilityStage("workspace");
-    location.hash = `utility/${project.id}`;
-    try { localStorage.removeItem(utilityDraftKey()); } catch { /* The form reports storage errors. */ }
-    void deleteNamingDraft();
-    setToast("名称已确认，正在保存并检查产品逻辑");
-  };
-  const openUtilityWorkspace = () => {
-    if (!utilityProject) return;
-    setUtilityStage("workspace");
-    // The workspace replaces the long naming page. Start the new stage at its
-    // top instead of preserving the naming page's scroll position.
-    requestAnimationFrame(() => {
-      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-    });
-  };
   const saveProductWorkflow = (projectId: string, workflow: ProductWorkflow) => {
     const apply = (item: Project): Project => {
       if (item.id !== projectId || workflow.sourceFingerprint !== namingFingerprint(item)) return item;
-      return { ...item, productWorkflow: workflow, name: workflow.selection.proposedName,
-        description: workflow.brief?.design.overview || item.description,
+      return { ...item, productWorkflow: workflow,
+        filingStatus: isProductWorkflowComplete(workflow) ? item.filingStatus || 'not_submitted' : undefined,
         status: isProductWorkflowComplete(workflow) ? 'ready' : 'draft', updatedAt: workflow.updatedAt };
     };
     setProjects(list => list.map(apply));
-    setUtilityProject(current => current ? apply(current) : current);
     setPreview(current => current ? apply(current) : current);
   };
   const openProject = (project: Project) => {
     if (project.productWorkflow && (project.category === 'utility' || project.category === 'invention')) {
-      if (project.category === 'utility') { setUtilityProject(project); setUtilityStage('workspace'); }
-      else setInventionStage('workspace');
-      // oxlint-disable-next-line react/immutability -- Hash navigation updates the browser route.
-      location.hash = `${project.category}/${project.id}`;
+      setWorkflowProjectId(project.id);
       setPreview(null);
     } else setPreview(project);
   };
-  const saveProject = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    const name = String(data.get("name") || "").trim();
-    if (!name) {
-      setError("请输入项目名称，不能只包含空格。");
-      (
-        event.currentTarget.elements.namedItem("name") as HTMLInputElement
-      ).focus();
-      return;
-    }
-    setSaving(true);
+  const saveProject = (value: Partial<Project>, start: boolean) => {
+    const current = projects.find(item => item.id === value.id);
     const project: Project = {
-      id: editor?.id || newId(),
-      name,
-      category: data.get("category") as CategoryId,
-      owner: String(data.get("owner") || "").trim(),
-      description: String(data.get("description") || "").trim(),
-      status: "draft",
-      updatedAt: new Date().toISOString(),
-      ...(editor?.category === 'invention' && data.get('category') === 'invention'
-        ? { inventionFacts: editor.inventionFacts, inventionMaterials: editor.inventionMaterials } : {}),
+      ...current, ...value,
+      id: value.id || newId(), name: value.name!, category: value.category!, owner: value.owner || '',
+      description: value.description || '', status: start ? 'draft' : current?.status || 'draft', updatedAt: new Date().toISOString(),
     };
-    setProjects((list) => [
-      project,
-      ...list.filter((p) => p.id !== project.id),
-    ]);
+    let company = companyList.find(item => item.id === project.companyId);
+    if (!company && project.owner.trim() && !project.companyId) {
+      company = companyList.find(item => companyNameKey(item.name) === companyNameKey(project.owner));
+      if (!company) {
+        company = { id: newId(), name: project.owner.trim(), mainProducts: project.baseProductName ? [project.baseProductName] : [], updatedAt: project.updatedAt };
+        setCompanyList(list => [...list, company!]);
+      }
+      project.companyId = company.id;
+    }
+    if (company) project.owner = company.name;
+    if (start) {
+      project.productWorkflow = createProductWorkflow(project);
+      project.utilityDrawing = undefined; project.utilityMaterials = undefined;
+      project.inventionFacts = undefined; project.inventionMaterials = undefined;
+      project.filingStatus = undefined;
+    } else if (value.category !== editor?.category) {
+      project.naming = undefined; project.productWorkflow = undefined; project.filingStatus = undefined;
+      project.utilityDrawing = undefined; project.utilityMaterials = undefined;
+      project.inventionFacts = undefined; project.inventionMaterials = undefined;
+    }
+    setProjects(list => [project, ...list.filter(item => item.id !== project.id)]);
+    if (start) setWorkflowSessions(current => [...current.filter(key => !key.startsWith(`${project.id}:`)), sessionKey(project)]);
     setEditor(null);
-    setSaving(false);
-    if (project.category === "invention") {
-      // Invention projects have a dedicated fact-confirmation workflow.
-      // Open it immediately so the generic project preview is not mistaken
-      // for the invention application workspace.
-      location.hash = `invention/${project.id}`;
-      setToast("项目已保存，请先核对技术事实并生成申请材料");
-    } else {
-      setToast("项目草稿已更新，正在保存");
-      setPreview(project);
-    }
+    if (start || project.category === 'utility' || project.category === 'invention') {
+      setPreview(null); setWorkflowProjectId(null);
+      clearFilters();
+      openCompanyScope(selectedCompany?.id || 'all');
+      setToast(start ? '项目已开始生成，可以继续新建项目' : '项目已更新');
+    } else { setPreview(project); setToast('项目草稿已更新，正在保存'); }
   };
-  const download = async (project: Project) => {
-    if (project.productWorkflow) {
+  const changeFilingStatus = (project: Project, filingStatus: FilingStatus) => {
+    if (!isGeneratedPatent(project)) return;
+    const update = (item: Project) => item.id === project.id && isGeneratedPatent(item)
+      ? { ...item, filingStatus, updatedAt: new Date().toISOString() } : item;
+    setProjects(list => list.map(update));
+    setPreview(current => current ? update(current) : current);
+    setToast(`申报状态已切换为${filingStatuses[filingStatus]}`);
+  };
+  const download = async (project: Project, format: PatentExportFormat = 'word') => {
+    if (exporting) return;
+    if (project.productWorkflow || project.category === 'invention' || project.category === 'utility') {
+      setExporting(format);
+      const label = format === 'pdf' ? 'PDF' : 'Word';
       try {
-        if (project.productWorkflow.sourceFingerprint !== namingFingerprint(project)) throw new Error('名称或特征已改变，请重新完成当前产品的预览确认。');
-        const blob = await createProductWordBlob(project.productWorkflow);
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement('a'); anchor.href = url; anchor.download = productWordFilename(project.productWorkflow); anchor.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        setToast('已导出含黑白附图和生成提示词的 Word 初稿，请专业核实后使用');
-      } catch (error) { setToast(error instanceof Error ? error.message : 'Word 导出失败'); }
-      return;
-    }
-    if (project.category === 'invention') {
-      try {
-        if (project.utilityDrawing && project.utilityMaterials && hasConfirmedUtilityStructure(project)) {
-          const blob = await createUtilityWordBlob(project, project.utilityDrawing, project.utilityMaterials);
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a'); a.href = url; a.download = utilityWordFilename(project.name, 'invention'); a.click();
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-          setToast('发明专利 Word 初稿已导出，请核对后进行专业审核');
-          return;
-        }
-        if (hasConfirmedUtilityStructure(project)) throw new Error('请先生成并校验当前结构的 V2 文案，不能导出旧版材料');
-        const blob = await createInventionWordBlob(project);
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = inventionWordFilename(project.name); a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        setToast('发明专利 Word 初稿已导出，请核对后进行专业审核');
-      } catch (error) { setToast(error instanceof Error ? error.message : 'Word 导出失败'); }
-      return;
-    }
-    if (project.category === "utility" && !hasConfirmedUtilityStructure(project)) {
-      setToast("请先确定 Patent Structure Model，才能导出申请材料");
+        downloadExport(await exportProjectPatent(structuredClone(project), format));
+        setToast(`${label} 申请材料初稿已导出，请核对后进行专业审核`);
+      } catch (error) { setToast(error instanceof Error ? error.message : `${label} 导出失败`); }
+      finally { setExporting(null); }
       return;
     }
     try {
       const url = URL.createObjectURL(new Blob([makeDocument(project)], { type: 'text/plain;charset=utf-8' }));
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${project.name.replace(/[/\\:*?"<>|]/g, '-')}-${project.category === 'utility' ? '材料初稿' : '材料模板'}.txt`;
+      a.download = `${project.name.replace(/[/\\:*?"<>|]/g, '-')}-材料模板.txt`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       setToast('材料已导出，请核对后进行专业审核');
     } catch (error) { setToast(error instanceof Error ? error.message : '材料导出失败'); }
   };
-  const visibleProjects =
-    page === "dashboard"
-      ? projects
-      : projects.filter(
-          (p) =>
-            (filter === "all" ||
-              p.status === filter ||
-              p.category === filter) &&
-            `${p.name}${categories.find((c) => c.id === p.category)?.name}`
-              .toLowerCase()
-              .includes(query.toLowerCase()),
-        );
+  const clearFilters = () => {
+    setQuery(''); setFilter('all'); setCategoryFilter('all'); setCompanyFilter('all'); setProductFilter('all'); setFilingFilter('all');
+  };
+  const hasFilters = !!query || [filter, categoryFilter, companyFilter, productFilter, filingFilter].some(value => value !== 'all');
+  const scopedProjects = companyScope === 'all' || !companyScope ? projects : companyScope === 'unassigned'
+    ? projects.filter(project => !companyForProject(project, companyList))
+    : projects.filter(project => companyForProject(project, companyList)?.id === companyScope);
+  const companies = [...new Set(scopedProjects.map(companyDisplayName).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  const products = [...new Set(scopedProjects.map(baseProductName).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  const visibleProjects = page === 'dashboard' ? projects : scopedProjects.filter(project =>
+    (filter === 'all' || project.status === filter) &&
+    (categoryFilter === 'all' || project.category === categoryFilter) &&
+    (companyFilter === 'all' || companyDisplayName(project) === companyFilter) &&
+    (productFilter === 'all' || baseProductName(project) === productFilter) &&
+    (filingFilter === 'all' || (isGeneratedPatent(project) && (project.filingStatus || 'not_submitted') === filingFilter)) &&
+    [project.name, companyDisplayName(project), baseProductName(project), project.naming?.selectedName,
+      categories.find(category => category.id === project.category)?.name].join(' ').toLowerCase().includes(query.trim().toLowerCase()));
   const navItems = [
     { id: "dashboard" as const, icon: LayoutDashboard },
     { id: "projects" as const, icon: FolderClosed },
@@ -430,9 +387,11 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
         <thead>
           <tr>
             <th>项目名称</th>
-            <th>类型</th>
+            <th className="project-company-column">公司</th>
+            <th className="project-product-column">基础产品名</th>
+            <th className="project-type-column">类型</th>
             <th>状态</th>
-            <th>最近更新</th>
+            <th className="project-date-column">最近更新</th>
             <th>
               <span className="sr-only">操作</span>
             </th>
@@ -457,20 +416,24 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
                       <span>
                         {p.name}
                         {p.demo && <small>示例项目</small>}
+                        <small className="project-mobile-meta">{companyDisplayName(p) || '未填写公司'} · {baseProductName(p) || '未填写产品'}</small>
                       </span>
                     </button>
                     <ProjectGenerationProgress project={p} />
                   </td>
-                  <td>
+                  <td className="project-company-column">{companyDisplayName(p) || '—'}</td>
+                  <td className="project-product-column"><span className="product-category-tag">{baseProductName(p) || '—'}</span></td>
+                  <td className="project-type-column">
                     <span className="type-label">{c.name}</span>
                   </td>
                   <td>
-                    <span className={`status ${p.status}`}>
+                    <span className={`status ${isGeneratedPatent(p) ? 'ready' : p.status}`}>
                       <span />
-                      {p.status === "draft" ? "草稿" : "已整理"}
+                      {isGeneratedPatent(p) ? '生成完毕' : p.status === "draft" ? "草稿" : "已整理"}
                     </span>
+                    <FilingStatusButtons project={p} onChange={changeFilingStatus} />
                   </td>
-                  <td className="date">
+                  <td className="date project-date-column">
                     {new Date(p.updatedAt)
                       .toLocaleDateString("zh-CN", {
                         month: "2-digit",
@@ -478,7 +441,7 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
                       })
                       .replaceAll("/", "-")}
                   </td>
-                  <td>
+                  <td className="project-actions-cell"><div className="project-row-actions">
                     <button
                       className="icon-button"
                       aria-label={`查看${p.name}`}
@@ -486,7 +449,9 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
                     >
                       <ChevronRight size={17} />
                     </button>
-                  </td>
+                    <button className="icon-button" aria-label={`编辑${p.name}`} onClick={() => setEditor(p)}><PenLine size={16} /></button>
+                    <button className="icon-button danger" aria-label={`删除${p.name}`} onClick={() => setDeleting(p)}><Trash2 size={16} /></button>
+                  </div></td>
                 </tr>
               );
             })}
@@ -496,25 +461,22 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
         <div className="empty-state">
           <Search size={30} />
           <h3>
-            {query || filter !== "all"
+            {hasFilters
               ? "没有找到相关项目"
               : "从第一份创意开始"}
           </h3>
           <p>
-            {query || filter !== "all"
+            {hasFilters
               ? "试试其他关键词，或切换项目筛选条件。"
               : "选择一种知识产权类型，创建你的第一个项目。"}
           </p>
           <button
             className="button secondary"
             onClick={() => {
-              if (query || filter !== "all") {
-                setQuery("");
-                setFilter("all");
-              } else create();
+              if (hasFilters) clearFilters(); else create();
             }}
           >
-            {query || filter !== "all" ? "清除筛选" : "新建项目"}
+            {hasFilters ? "清除筛选" : "新建项目"}
           </button>
         </div>
       )}
@@ -561,6 +523,7 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
         {workspaceManager}
         <div className="nav-label">工作空间</div>
         <nav aria-label="主要导航">
+          {user?.role === 'admin' && <a href="#admin" className="nav-item"><ShieldCheck size={19} /><span>管理控制台</span></a>}
           {navItems.map(({ id, icon: Icon }) => (
             <a
               key={id}
@@ -571,7 +534,7 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
               <Icon size={19} />
               <span>{pages[id]}</span>
               {id === "projects" && (
-                <span className="nav-count">{projects.length}</span>
+                <span className="nav-count">{companyList.length}</span>
               )}
             </a>
           ))}
@@ -607,7 +570,7 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
             </button>
             <span>{workspaceName || '工作空间'}</span>
             <ChevronRight size={14} />
-            <strong>{page === "utility" && utilityStage === "workspace" ? "实用新型 · 产品预览与成品" : pages[page]}</strong>
+            <strong>{page === 'projects' && companyScope ? selectedCompany?.name || (companyScope === 'all' ? '全部专利' : '未归属企业的专利') : pages[page]}</strong>
           </div>
           <div className="header-actions">
             <label className="global-search">
@@ -618,8 +581,7 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
-                  setFilter("all");
-                  if (page !== "projects") navigate("projects");
+                  if (page !== "projects" || directory) { setCompanyScope('all'); location.hash = 'projects/all'; }
                 }}
               />
               <kbd>⌕</kbd>
@@ -663,7 +625,7 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
               {profile && (
                 <div className="popover">
                   <strong>{user?.displayName || '个人工作空间'}</strong>
-                  {user && <p>@{user.username} · 普通用户</p>}
+                  {user && <p>@{user.username} · {user.role === 'admin' ? '管理员' : '普通用户'}</p>}
                   <p>
                     {storageMode === 'mysql' ? '每个工作空间只属于你的账号，项目、草稿和资料按空间独立保存。' : '当前使用浏览器存储，请及时导出重要材料。'}
                   </p>
@@ -680,10 +642,12 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
         <main id="main" ref={mainRef} tabIndex={-1}>
           {projects.filter(project => workflowSessions.includes(sessionKey(project)) || sessionKey(project) === activeSession).map(project => {
             const visible = sessionKey(project) === activeSession;
-            return <div key={sessionKey(project)} className="project-session" hidden={!visible}>
-              <ProductWorkflowWorkspace project={project} visible={visible} onSave={saveProductWorkflow}
-                onBack={() => project.category === 'utility' ? setUtilityStage('naming') : setInventionStage('naming')} />
-            </div>;
+            return <Modal key={sessionKey(project)} title="项目详情与生成成果" className="project-workflow-modal" open={visible}
+              onClose={() => { setWorkflowProjectId(null); if (page === 'invention') openCompanyScope(companyForProject(project, companyList)?.id || 'all'); }}>
+              <ProductWorkflowWorkspace project={project} visible={visible} managed onSave={saveProductWorkflow}
+                onBack={() => { setWorkflowProjectId(null); if (page === 'invention') openCompanyScope(companyForProject(project, companyList)?.id || 'all'); }} />
+              <FilingStatusButtons project={project} onChange={changeFilingStatus} />
+            </Modal>;
           })}
           {page === 'invention' && inventionProject ? (
             inventionStage === "workspace" && inventionProject.naming ? (
@@ -691,18 +655,6 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
             ) : (
               <UtilityNaming key={inventionProject.id} project={inventionProject} patentType="invention"
                 onSave={saveInventionName} onOpenWorkspace={() => setInventionStage("workspace")} onBack={() => navigate("dashboard")} />
-            )
-          ) : page === "utility" ? (
-            utilityStage === "workspace" && utilityProject ? (
-              null
-            ) : (
-              <UtilityNaming
-                key={utilityProject?.id || "new-utility"}
-                project={utilityProject}
-                onSave={saveUtilityName}
-                onOpenWorkspace={openUtilityWorkspace}
-                onBack={() => navigate("dashboard")}
-              />
             )
           ) : page === "dashboard" ? (
             <>
@@ -745,7 +697,7 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
                         else {
                           setFilter(valueFilter);
                           setQuery("");
-                          navigate("projects");
+                          setCompanyScope('all'); location.hash = 'projects/all';
                         }
                       }}
                     >
@@ -811,7 +763,7 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
                       onClick={() => {
                         setFilter("all");
                         setQuery("");
-                        navigate("projects");
+                        openCompanyScope('all');
                       }}
                     >
                       查看全部
@@ -827,10 +779,11 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
               <section className="page-heading">
                 <div>
                   <div className="eyebrow">YOUR CREATIVE WORKSPACE</div>
-                  <h1>{pages[page]}</h1>
+                  {page === 'projects' && companyScope && <button className="text-button company-back" onClick={() => openCompanyScope()}><ArrowLeft size={16} />返回企业列表</button>}
+                  <h1>{page === 'projects' && companyScope ? selectedCompany ? `${selectedCompany.name}的专利` : companyScope === 'all' ? '全部专利' : companyScope === 'unassigned' ? '未归属企业的专利' : '企业不存在' : pages[page]}</h1>
                   <p>
                     {page === "projects"
-                      ? "实时查看专利生成进度，点击项目继续确认预览或查看成果。"
+                      ? directory ? '先建立企业资料，进入企业后管理该公司的全部专利。' : selectedCompany ? `主营产品：${selectedCompany.mainProducts.join('、') || '待补充'}` : '新建专利、选择问题、查看进度与管理申报状态。'
                       : page === "materials"
                         ? "整理你的参考文件，为下一次创作做好准备。"
                         : "从结构化模板开始，告别面对空白页的犹豫。"}
@@ -839,7 +792,7 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
                 <button
                   className="button primary"
                   onClick={() =>
-                    page === "materials" ? upload.current?.click() : create()
+                    page === "materials" ? upload.current?.click() : directory ? setCompanyEditor({}) : create()
                   }
                 >
                   {page === "materials" ? (
@@ -847,10 +800,13 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
                   ) : (
                     <Plus size={18} />
                   )}{" "}
-                  {page === "materials" ? "选择本地文件" : "新建项目"}
+                  {page === "materials" ? "选择本地文件" : directory ? "新增企业" : page === 'projects' ? '新增专利' : '新建项目'}
                 </button>
               </section>
-              {page === "projects" && (
+              {directory && <CompanyDirectory companies={companyList} projects={projects}
+                onCreate={() => setCompanyEditor({})} onEdit={setCompanyEditor} onDelete={setDeletingCompany}
+                onOpen={company => openCompanyScope(company.id)} onAll={() => openCompanyScope('all')} onUnassigned={() => openCompanyScope('unassigned')} />}
+              {page === "projects" && companyScope && (
                 <section className="projects-panel">
                   <div className="project-toolbar">
                     <div className="tabs">
@@ -872,12 +828,8 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
                       <Settings2 size={16} />
                       <select
                         aria-label="按知识产权类型筛选"
-                        value={
-                          categories.some((c) => c.id === filter)
-                            ? filter
-                            : "all"
-                        }
-                        onChange={(e) => setFilter(e.target.value)}
+                        value={categoryFilter}
+                        onChange={(e) => setCategoryFilter(e.target.value)}
                       >
                         <option value="all">全部类型</option>
                         {categories.map((c) => (
@@ -888,6 +840,19 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
                       </select>
                     </label>
                   </div>
+                  <div className="project-search-filters">
+                    <label className="project-search-field"><span>查询项目</span><div><Search size={16} /><input aria-label="查询项目" value={query} onChange={event => setQuery(event.target.value)} placeholder="项目名、专利名、公司或基础产品名" /></div></label>
+                    <label><span>公司</span><select aria-label="按公司筛选" value={companyFilter} onChange={event => setCompanyFilter(event.target.value)}>
+                      <option value="all">全部公司</option>{companies.map(company => <option value={company} key={company}>{company}</option>)}
+                    </select></label>
+                    <label><span>基础产品名</span><select aria-label="按基础产品名筛选" value={productFilter} onChange={event => setProductFilter(event.target.value)}>
+                      <option value="all">全部产品</option>{products.map(product => <option value={product} key={product}>{product}</option>)}
+                    </select></label>
+                    <label><span>申报状态</span><select aria-label="按申报状态筛选" value={filingFilter} onChange={event => setFilingFilter(event.target.value)}>
+                      <option value="all">全部申报状态</option>{Object.entries(filingStatuses).map(([status, label]) => <option key={status} value={status}>{label}</option>)}
+                    </select></label>
+                  </div>
+                  <div className="project-results"><span>共 {scopedProjects.length} 项专利，当前显示 {visibleProjects.length} 项</span>{hasFilters && <button className="text-button" onClick={clearFilters}>重置筛选</button>}</div>
                   {projectTable}
                 </section>
               )}
@@ -1012,115 +977,16 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
           </footer>
         </main>
       </div>
-      {editor && (
-        <Modal
-          title={editor.id ? "编辑项目" : "开始一份新的创作"}
-          onClose={() => {
-            const form = document.getElementById(
-              "project-form",
-            ) as HTMLFormElement;
-            const data = form ? new FormData(form) : null;
-            const dirty =
-              data &&
-              ["name", "owner", "description", "category"].some(
-                (key) =>
-                  String(data.get(key) || "") !==
-                  String(editor[key as keyof Project] || ""),
-              );
-            if (!dirty || window.confirm("有尚未保存的修改，确定放弃吗？"))
-              setEditor(null);
-          }}
-        >
-          <form id="project-form" onSubmit={saveProject}>
-            <p className="form-intro">
-              记录创意的起点。保存后，你可以预览并导出材料整理模板。
-            </p>
-            <label htmlFor="category">知识产权类型</label>
-            <select
-              id="category"
-              name="category"
-              value={editor.category || selectedCategory}
-              onChange={(e) => {
-                if (e.target.value === "utility") {
-                  setEditor(null);
-                  setUtilityProject(
-                    editor.id
-                      ? ({ ...editor, category: "utility" } as Project)
-                      : undefined,
-                  );
-                  navigate("utility");
-                } else {
-                  const category = e.target.value as CategoryId;
-                  setSelectedCategory(category);
-                  setEditor(previous => previous ? { ...previous, category } : previous);
-                }
-              }}
-            >
-              {categories.map((c) => (
-                <option value={c.id} key={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            <label htmlFor="project-name">
-              项目名称 <span className="required">*</span>
-            </label>
-            <input
-              data-autofocus
-              id="project-name"
-              name="name"
-              required
-              maxLength={100}
-              defaultValue={editor.name}
-              placeholder="为你的创意起一个清晰的名字"
-              aria-describedby={error ? "name-error" : undefined}
-            />
-            {error && (
-              <p id="name-error" className="form-error" role="alert">
-                {error}
-              </p>
-            )}
-            <label htmlFor="owner">
-              申请人 / 著作权人 <span className="optional">选填</span>
-            </label>
-            <input
-              id="owner"
-              name="owner"
-              defaultValue={editor.owner}
-              maxLength={100}
-              placeholder="个人或企业名称"
-            />
-            <label htmlFor="description">
-              创意描述 <span className="optional">选填</span>
-            </label>
-            <textarea
-              id="description"
-              name="description"
-              rows={4}
-              defaultValue={editor.description}
-              maxLength={5000}
-              placeholder={
-                categories.find((c) => c.id === selectedCategory)?.hint
-              }
-            />
-            <p className="field-help">
-              <ShieldCheck size={14} />
-              {storageMode === 'mysql' ? '草稿会自动保存到服务器的 MySQL 数据库。' : '草稿保存在当前浏览器。'}
-            </p>
-            <div className="form-footer">
-              <span>先记录，再慢慢完善</span>
-              <button
-                className="button primary"
-                type="submit"
-                disabled={saving}
-              >
-                <Check size={17} />
-                {saving ? "保存中…" : "保存并预览"}
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
+      {editor && <ProjectEditor initial={editor} companies={companyList} company={selectedCompany} onSave={saveProject} onClose={() => setEditor(null)} />}
+      {companyEditor && <CompanyEditor initial={companyEditor} companies={companyList} onSave={saveCompany} onClose={() => setCompanyEditor(null)} />}
+      {deletingCompany && <Modal title="删除企业？" onClose={() => setDeletingCompany(null)}>
+        <p className="delete-message">删除“{deletingCompany.name}”的企业资料？已有专利会保留，并移到“未归属企业的专利”，可重新归属企业。</p>
+        <div className="confirm-actions"><button className="button secondary" onClick={() => setDeletingCompany(null)}>保留企业</button>
+          <button className="button danger-button" onClick={() => {
+            setCompanyList(list => list.filter(company => company.id !== deletingCompany.id));
+            setDeletingCompany(null); setToast('企业已删除，已有专利已保留');
+          }}>确认删除企业</button></div>
+      </Modal>}
       {preview && (
         <Modal title="项目材料预览" onClose={() => setPreview(null)} wide>
           <div className="preview-heading">
@@ -1137,6 +1003,8 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
             </p>
           </div>
           <ProjectGenerationProgress project={preview} />
+          <div className="project-preview-meta"><span>公司：{companyDisplayName(preview) || '未填写'}</span><span>基础产品名：{baseProductName(preview) || '未填写'}</span></div>
+          <FilingStatusButtons project={preview} onChange={changeFilingStatus} />
           {preview.productWorkflow
             ? isProductWorkflowComplete(preview.productWorkflow) && preview.productWorkflow.sourceFingerprint === namingFingerprint(preview)
               ? <pre className="document-preview">{makeDocument(preview)}</pre>
@@ -1157,40 +1025,13 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
             <button
               className="button secondary"
               onClick={() => {
-                if (preview.category === "utility") {
-                  setUtilityProject(preview);
-                  setUtilityStage("naming");
-                  location.hash = `utility/${preview.id}`;
-                } else if (preview.category === 'invention' && preview.naming) {
-                  setInventionStage('naming');
-                  location.hash = `invention/${preview.id}`;
-                } else {
-                  setEditor(preview);
-                  setSelectedCategory(preview.category);
-                }
+                setEditor(preview);
                 setPreview(null);
-                setError("");
               }}
             >
               编辑项目
             </button>
-            {preview.category === "utility" && (
-              <button
-                className="button secondary"
-                onClick={() => {
-                  setUtilityProject(preview);
-                  setUtilityStage("workspace");
-                  location.hash = `utility/${preview.id}`;
-                  setPreview(null);
-                }}
-              >
-                <PenLine size={16} />
-                产品预览与成品
-              </button>
-            )}
-            {preview.category === 'invention' && <button className="button secondary" onClick={() => {
-              location.hash = `invention/${preview.id}`; setPreview(null);
-            }}><PenLine size={16} /> 发明申请材料</button>}
+            {preview.productWorkflow && <button className="button secondary" onClick={() => openProject(preview)}><PenLine size={16} />查看生成成果</button>}
             <button
               className="button secondary"
               onClick={() => {
@@ -1219,12 +1060,14 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
             <button
               className="button primary"
               onClick={() => download(preview)}
-              disabled={preview.productWorkflow ? !isProductWorkflowComplete(preview.productWorkflow) || preview.productWorkflow.sourceFingerprint !== namingFingerprint(preview) : (preview.category === "utility" && !hasConfirmedUtilityStructure(preview)) ||
-                (preview.category === 'invention' && (() => { try { validateInventionMaterials(preview.name, preview.inventionFacts, preview.inventionMaterials); return false; } catch { return true; } })())}
+              disabled={!!exporting || ((preview.productWorkflow || preview.category === 'utility' || preview.category === 'invention') && !canExportPatent(preview))}
             >
               <ArrowDownToLine size={16} />
-              {preview.productWorkflow || preview.category === 'invention' ? '下载 Word' : '导出模板'}
+              {exporting === 'word' ? '正在打包 Word…' : preview.productWorkflow || preview.category === 'invention' || preview.category === 'utility' ? '下载 Word' : '导出模板'}
             </button>
+            {(preview.productWorkflow || preview.category === 'invention' || preview.category === 'utility') && <button
+              className="button secondary" onClick={() => void download(preview, 'pdf')} disabled={!!exporting || !canExportPatent(preview)}
+            ><ArrowDownToLine size={16} />{exporting === 'pdf' ? '正在生成 PDF…' : '下载 PDF'}</button>}
           </div>
         </Modal>
       )}
@@ -1256,7 +1099,7 @@ function App({ user = null, workspaceManager, workspaceName }: { user?: AuthUser
       )}
       <div className="toast-container" aria-live="polite" role="status">
         {storageIssue && <div className="toast" role="alert"><span>{storageIssue} 当前修改仍保留在页面，请先备份。</span><button className="button secondary" onClick={() => {
-          const url = URL.createObjectURL(new Blob([JSON.stringify({ projects, materials }, null, 2)], { type: 'application/json' }));
+          const url = URL.createObjectURL(new Blob([JSON.stringify({ companies: companyList, projects, materials }, null, 2)], { type: 'application/json' }));
           const anchor = document.createElement('a'); anchor.href = url; anchor.download = '知创工坊-未保存数据.json'; anchor.click(); URL.revokeObjectURL(url);
         }}>导出备份</button></div>}
         {toast && (

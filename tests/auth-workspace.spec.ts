@@ -22,8 +22,16 @@ test('注册、普通用户、刷新、退出和重新登录，登录界面无�
   await page.screenshot({ path: 'artifacts/auth-register-desktop.png', fullPage: true });
   await page.getByRole('button', { name: '创建账号并进入' }).click();
   await expect(page.getByRole('link', { name: /项目管理/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '项目管理' })).toBeVisible();
+  await expect(page).toHaveURL(/#projects$/);
+  await page.goto('/');
+  await expect(page).toHaveURL(/#projects$/);
   await page.reload();
-  await expect(page.getByRole('link', { name: /项目管理/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '项目管理' })).toBeVisible();
+  await page.getByRole('link', { name: '工作台', exact: true }).click();
+  await page.reload();
+  await expect(page).toHaveURL(/#dashboard$/);
+  await expect(page.locator('.category-card')).toHaveCount(4);
   await page.getByRole('button', { name: '个人工作空间信息' }).click();
   await expect(page.getByText(`@${username} · 普通用户`, { exact: true })).toBeVisible();
   page.once('dialog', dialog => dialog.accept());
@@ -37,6 +45,8 @@ test('注册、普通用户、刷新、退出和重新登录，登录界面无�
   await page.getByLabel('密码', { exact: true }).fill('TestPassword123!');
   await page.getByRole('button', { name: '登录工作台' }).click();
   await expect(page.getByRole('link', { name: /项目管理/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '项目管理' })).toBeVisible();
+  await expect(page).toHaveURL(/#projects$/);
 });
 
 test('手机布局、重复账号提示和账号服务故障重试', async ({ page }) => {

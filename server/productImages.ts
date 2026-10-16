@@ -1,15 +1,21 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { createUsageRecorder } from './aiUsage.ts';
+import { markAiResponseFailure } from './aiAudit.ts';
 import { lookup } from 'node:dns/promises';
 import { get } from 'node:https';
 import { isIP } from 'node:net';
 import type { IncomingMessage } from 'node:http';
 import { AiFailure, AI_USER_AGENT, responseText } from './aiSupport.ts';
 import type { AiConfig } from './aiSupport.ts';
+import { GenerationQueue } from './generationQueue.ts';
 import { signProductArtifact } from './productProof.ts';
 import type { ProductBrief, ProductImage, ProductImageRef } from '../src/features/product/productWorkflow.ts';
 import { buildPatentFigurePrompt, buildPreviewPrompt } from '../src/features/product/productPrompts.ts';
 
 const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
+// All billable image requests share one process-wide upstream slot. This also
+// covers different projects and image stages running in the same backend.
+const imageRequestQueue = new GenerationQueue(1);
 export function isPublicImageAddress(address: string): boolean {
   if (isIP(address) !== 4) return false;
   const [a, b] = address.split('.').map(Number);
@@ -76,8 +82,6 @@ export async function generateProductImage(brief: ProductBrief, kind: 'preview' 
     throw new AiFailure(400, 'PREVIEW_REFERENCE_REQUIRED', '请先生成同一版本的主体图，再以主体图为参考生成其他视角。');
   }
   const settings = config.image!;
-  const timeout = AbortSignal.timeout(settings.timeoutMs ?? 210000);
-  const combined = AbortSignal.any([signal, timeout]);
   const prompt = kind === 'preview' ? buildPreviewPrompt(brief, templateId) : buildPatentFigurePrompt(brief, templateId);
   let body: string | FormData;
   if (needsReference) {
@@ -96,11 +100,20 @@ export async function generateProductImage(brief: ProductBrief, kind: 'preview' 
   } else {
     body = JSON.stringify({ model: settings.model, prompt, n: 1, ...(settings.size ? { size: settings.size } : {}) });
   }
+  let usage: unknown;
+  const recordUsage = createUsageRecorder(settings.model);
+  let auditResponse: Response | undefined;
+  let timeout: AbortSignal | undefined;
+  let releaseImageSlot: (() => void) | undefined;
   try {
+    releaseImageSlot = await imageRequestQueue.acquire(signal);
+    timeout = AbortSignal.timeout(settings.timeoutMs ?? 210000);
+    const combined = AbortSignal.any([signal, timeout]);
     const response = await fetcher(`${settings.baseUrl}/images/${needsReference ? 'edits' : 'generations'}`, { method: 'POST', redirect: 'error', signal: combined,
       headers: { Authorization: `Bearer ${settings.apiKey}`, ...(!needsReference ? { 'Content-Type': 'application/json' } : {}), 'User-Agent': AI_USER_AGENT },
       body,
     });
+    auditResponse = response;
     if (!response.ok) {
       // Inspect only bounded diagnostics for known capability errors; never return raw provider text.
       let diagnostic = '';
@@ -115,9 +128,10 @@ export async function generateProductImage(brief: ProductBrief, kind: 'preview' 
       if (needsReference) throw new AiFailure(502, 'IMAGE_REFERENCE_UPSTREAM', '主体图已保留，但参考图生图失败。请核对图片模型与服务商是否支持 images/edits 上传参考图片；未改用独立文字生图，也未自动重复提交。');
       throw new AiFailure(502, 'IMAGE_UPSTREAM', '生图调用失败，请核对模型是否支持 images/generations 接口。未自动重复扣费请求。');
     }
-    let payload: { data?: { b64_json?: unknown; url?: unknown }[] };
+    let payload: { data?: { b64_json?: unknown; url?: unknown }[]; usage?: unknown };
     try { payload = JSON.parse(await responseText(response, MAX_IMAGE_BYTES * 1.5)); }
     catch (error) { if (error instanceof AiFailure) throw error; throw new AiFailure(502, 'IMAGE_INVALID_RESPONSE', '生图服务未返回有效 JSON。'); }
+    usage = payload?.usage;
     const image = payload?.data?.[0];
     let bytes: Buffer;
     if (typeof image?.b64_json === 'string' && /^[A-Za-z0-9+/]+={0,2}$/.test(image.b64_json)) bytes = Buffer.from(image.b64_json, 'base64');
@@ -129,9 +143,13 @@ export async function generateProductImage(brief: ProductBrief, kind: 'preview' 
       digest: createHash('sha256').update(bytes).digest('hex'), createdAt: new Date().toISOString() }, config);
     return { ...reference, dataUrl: `data:${mimeType};base64,${bytes.toString('base64')}`, prompt, model: settings.model };
   } catch (error) {
+    await markAiResponseFailure(auditResponse, error);
     if (signal.aborted) throw new AiFailure(499, 'AI_CANCELLED', '已取消生图请求；已有成果仍保留。');
-    if (timeout.aborted) throw new AiFailure(504, 'IMAGE_TIMEOUT', '生图超时；上游可能仍在处理，未自动重复提交。请稍后手动重试。');
+    if (timeout?.aborted) throw new AiFailure(504, 'IMAGE_TIMEOUT', '生图超时；上游可能仍在处理，未自动重复提交。请稍后手动重试。');
     if (error instanceof AiFailure) throw error;
     throw new AiFailure(502, 'IMAGE_NETWORK', '生图网络连接失败，未自动重复提交；请稍后重试。');
+  } finally {
+    releaseImageSlot?.();
+    recordUsage(usage);
   }
 }

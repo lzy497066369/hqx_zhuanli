@@ -28,6 +28,7 @@ import { GenerationProgress } from './generationProgress';
 import type { ProgressStep } from './generationProgress';
 import { progressRequest, withAiRetry } from './progressRequest';
 import "./utility.css";
+import { ProductProblemNaming } from '../product/ProductProblemNaming';
 
 type ProductOption = { product: string; features: string[] };
 const shapeTerms = /形状|外形|轮廓|截面|弧形|曲面|曲线|槽|孔|叶片|齿形|纹路|折叠|弯折/u;
@@ -95,12 +96,15 @@ export function UtilityNaming({
 }) {
   const [initialDraft, setInitialDraft] = useState<NamingRecord | null>(null);
   const [loadError, setLoadError] = useState('');
+  const [advanced, setAdvanced] = useState(false);
   useEffect(() => {
     let cancelled = false;
     loadNamingDraftAsync(project?.id, project).then(draft => {
       if (cancelled) return;
       // oxlint-disable-next-line react/set-state-in-effect -- Async draft restore.
       setInitialDraft(draft);
+      // Existing feature-based projects retain their original editing form.
+      setAdvanced(!draft.problemProposal && !draft.problemSelection && !!(draft.structureSelection || draft.candidates.length || draft.profile.features));
     }).catch(error => {
       if (!cancelled) setLoadError(error instanceof Error ? error.message : '命名草稿加载失败。');
     });
@@ -117,15 +121,17 @@ export function UtilityNaming({
       </div>
     );
   }
+  if (!advanced) return <ProductProblemNaming initialDraft={initialDraft} project={project} onSave={onSave} onBack={onBack}
+    onAdvanced={draft => { setInitialDraft(draft); setAdvanced(true); }} patentType={patentType} />;
   return (
-    <UtilityNamingForm
+    <><button className="button secondary" onClick={() => setAdvanced(false)}>按技术问题生成</button><UtilityNamingForm
       project={project}
       onSave={onSave}
       onBack={onBack}
       onOpenWorkspace={onOpenWorkspace}
       patentType={patentType}
       initialDraft={initialDraft}
-    />
+    /></>
   );
 }
 function UtilityNamingForm({
@@ -287,7 +293,7 @@ function UtilityNamingForm({
       if (!isStructureEvidenceOptions(result.options, ['component', 'relationship', 'motion', 'geometry', 'problem'])) throw new Error('结构资料选项不完整，请重新生成。');
       setDraft(d => ({ ...d, structureOptions: result.options, structureSelection: { version: 1, options: result.options, selectedIds: [], confirmed: false }, candidates: [], selectedName: '' }));
       setSaved(false); setTitleOpen(false);
-      setFeedback({ kind: 'success', text: '请逐项核对结构资料，仅勾选实际具备的内容。' });
+      setFeedback({ kind: 'success', text: '请逐项核对结构资料，仅勾选实际具备的内容，完成后点击“下一步”。' });
     } catch (cause) {
       if (signal.aborted) return;
       if (version === requestVersion.current) setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : '结构资料生成失败，请重试。' });
@@ -301,16 +307,18 @@ function UtilityNamingForm({
   };
   const generateNames = async () => {
     if (busy) return;
-    if (!draft.structureSelection?.confirmed || missingStructureEvidenceCategories(draft.structureSelection).length) { setFeedback({ kind: 'error', text: '请先选择并确认产品结构、连接、运动和外形空间资料。' }); return; }
+    if (!draft.structureSelection || missingStructureEvidenceCategories(draft.structureSelection).length) { setFeedback({ kind: 'error', text: '请先选择产品结构、连接、运动和外形空间资料。' }); return; }
     if (!profile.product.trim() || !profile.features.trim() || !profile.improvementType) { setFeedback({ kind: 'error', text: '请先选择保护客体、改进类型，并至少勾选一项实际结构特征。' }); return; }
     const problems = validateProfile(profile);
     setErrors(problems);
     if (Object.keys(problems).length) { setFeedback({ kind: 'error', text: Object.values(problems).join(' ') }); return; }
+    const structureEvidence = { ...draft.structureSelection, confirmed: true };
+    setDraft(d => ({ ...d, structureSelection: structureEvidence }));
     const { version, signal } = beginRequest();
     setBusy('names'); setFeedback(null); setMessage('');
     setProgressSteps([{ label: '提交已确认资料', detail: '正在连接生成服务' }]);
     try {
-      const result = await postNaming<{ candidates: NamingRecord['candidates'] }>("/api/utility/naming-names", { profile, structureEvidence: draft.structureSelection, previous: draft.candidates.map(item => item.name) }, progressFor(version), signal,
+      const result = await postNaming<{ candidates: NamingRecord['candidates'] }>("/api/utility/naming-names", { profile, structureEvidence, previous: draft.candidates.map(item => item.name) }, progressFor(version), signal,
         () => { if (version === requestVersion.current) setFeedback({ kind: 'success', text: '请求受限，5 秒后自动重试一次…' }); });
       if (version !== requestVersion.current) return;
       setDraft(d => ({ ...d, candidates: result.candidates, selectedName: '' }));
@@ -470,16 +478,12 @@ function UtilityNamingForm({
                 {(Object.keys(structureEvidenceCategoryLabels) as StructureEvidenceCategory[]).map(category => <div key={category} className="un-evidence-group"><strong>{structureEvidenceCategoryLabels[category]}</strong>
                   {draft.structureOptions!.filter(option => option.category === category).map((option, index) => <label key={option.id} className="un-feature"><input type="checkbox" checked={!!draft.structureSelection?.selectedIds.includes(option.id)} onChange={() => toggleEvidence(option.id)} disabled={!!busy} /><span><b>{option.label}</b>{index === 0 && <small className="un-recommendation"><Lightbulb size={13} />建议优先核对：{evidenceRecommendation(category)}</small>}<small>{option.detail}</small></span></label>)}
                 </div>)}
-                <button type="button" className="button secondary" disabled={!!busy || !draft.structureSelection?.selectedIds.length || !!missingStructureEvidenceCategories(draft.structureSelection).length} onClick={() => { setDraft(d => ({ ...d, structureSelection: d.structureSelection ? { ...d.structureSelection, confirmed: true } : undefined })); setFeedback({ kind: 'success', text: '结构资料已确认，可以生成名称。' }); }}>确认所选结构资料</button>
                 {draft.structureSelection?.confirmed && <p role="status">已确认 {draft.structureSelection.selectedIds.length} 项结构资料</p>}
                 {!!missingStructureEvidenceCategories(draft.structureSelection).length && <p className="un-hint">尚需确认：{missingStructureEvidenceCategories(draft.structureSelection).map(category => structureEvidenceCategoryLabels[category]).join('、')}</p>}
               </fieldset>}
               <div className="un-structure-actions">
-                <button type="button" className="button secondary un-generate" disabled={!profile.product || !profile.features || !profile.improvementType || !!busy} aria-busy={busy === 'evidence'} onClick={() => void generateEvidence()}>
-                  <Sparkles size={17} />{busy === 'evidence' ? '正在整理结构资料…' : draft.structureOptions?.length ? '重新整理结构资料' : '生成结构资料选项'}
-                </button>
-                <button type="button" className="button primary un-generate" disabled={!draft.structureSelection?.confirmed || !!busy} aria-busy={busy === 'names'} onClick={() => void generateNames()}>
-                  <Sparkles size={17} />{busy === 'names' ? '正在生成名称…' : draft.candidates.length ? '换一批名称' : '确认选项并生成名称'}<ArrowRight size={16} />
+                <button type="button" className="button primary un-generate" disabled={!profile.product || !profile.features || !profile.improvementType || !!busy || (!!draft.structureOptions?.length && !!missingStructureEvidenceCategories(draft.structureSelection).length)} aria-busy={busy === 'evidence' || busy === 'names'} onClick={() => void (draft.structureOptions?.length ? generateNames() : generateEvidence())}>
+                  <Sparkles size={17} />{busy === 'evidence' ? '正在整理结构资料…' : busy === 'names' ? '正在生成名称…' : '下一步'}<ArrowRight size={16} />
                   {busy === 'names' && <span className="un-button-progress" role="progressbar" aria-label="名称生成进度" aria-valuetext="正在生成" />}
                 </button>
               </div>

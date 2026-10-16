@@ -1,0 +1,10 @@
+import fs from 'node:fs/promises';
+import { runFreeCad, resolveFreeCad } from '../../server/productCad.ts';
+import { renderPlannedFigures } from '../../server/cadResources.ts';
+const source=JSON.parse(await fs.readFile(process.env.DRAWING_ACCEPTANCE_SOURCE || 'artifacts/patent-drawing-2026-10-14/complex-clamp/original-text-source.json','utf8'));
+const decision=JSON.parse(await fs.readFile(process.env.DRAWING_DECISION || 'artifacts/patent-drawing-2026-10-14/experiment-text-cad/verified-decision.json','utf8'));
+const command=await resolveFreeCad({}), signal=AbortSignal.timeout(300000);
+const run=await runFreeCad(decision.script,command,{plan:decision.drawingPlan,components:source.brief.design.components.map(p=>p.number),signal});
+const views=await renderPlannedFigures(run,decision.drawingPlan,source.brief.design.title,signal);
+await fs.writeFile(process.env.DRAWING_SOAK_FIXTURE || 'artifacts/patent-drawing-2026-10-14/final-clamp/soak-fixture.json',JSON.stringify({run,plan:decision.drawingPlan,title:source.brief.design.title,views}));
+console.log(JSON.stringify({prepared:true,triangles:run.mesh.triangles.length,figures:views.length}));

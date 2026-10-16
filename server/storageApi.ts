@@ -3,6 +3,7 @@ import type { RowDataPacket, PoolConnection } from 'mysql2/promise';
 import { MysqlDatabase } from './mysql/database.ts';
 import type { StorageConfig } from './mysql/database.ts';
 import { requestContext } from './requestContext.ts';
+import { isCompanies } from '../src/features/projects/company.ts';
 
 const ROOT = '/api/storage';
 const MAX_BODY = 96 * 1024 * 1024;
@@ -28,6 +29,9 @@ function projects(value: unknown): ProjectInput[] {
       !string(p.description, 200000) || !['invention','utility','design','software'].includes(String(p.category)) ||
       !['draft','ready'].includes(String(p.status)) || !string(p.updatedAt, 64) || Number.isNaN(Date.parse(p.updatedAt)) ||
       (p.demo !== undefined && typeof p.demo !== 'boolean')) invalid();
+    if ((p.baseProductName !== undefined && !string(p.baseProductName, 100)) ||
+      (p.companyId !== undefined && !id(p.companyId)) ||
+      (p.filingStatus !== undefined && !['not_submitted', 'in_progress', 'completed'].includes(String(p.filingStatus)))) invalid();
     seen.add(p.id);
   }
   return value;
@@ -97,6 +101,31 @@ export function createStorageMiddleware(config: StorageConfig, allowedOrigins = 
         if (!rows.length) throw new StorageFailure(404, 'WORKSPACE_NOT_FOUND', '工作空间不存在或无权访问。');
       };
       const resource = path === `${ROOT}/projects` ? 'projects' : path === `${ROOT}/materials` ? 'materials' : undefined;
+      if (path === `${ROOT}/companies`) {
+        if (req.method === 'GET') {
+          const result = await database.transaction(async connection => {
+            await assertWorkspace(connection);
+            const [rows] = await connection.execute<RowDataPacket[]>('SELECT data, revision FROM company_directories WHERE workspace_id = ?', [workspaceId]);
+            return rows.length ? { companies: json(rows[0].data), revision: rows[0].revision, initialized: true }
+              : { companies: [], revision: 0, initialized: false };
+          });
+          send(res, 200, result); return;
+        }
+        if (req.method !== 'PUT') throw new StorageFailure(405, 'METHOD_NOT_ALLOWED', '接口不支持此请求方法。');
+        const input = await body(req);
+        if (!revision(input.revision) || !isCompanies(input.companies)) invalid();
+        const result = await database.transaction(async connection => {
+          await assertWorkspace(connection);
+          await connection.execute('SELECT id FROM workspaces WHERE id = ? FOR UPDATE', [workspaceId]);
+          const [rows] = await connection.execute<RowDataPacket[]>('SELECT revision FROM company_directories WHERE workspace_id = ? FOR UPDATE', [workspaceId]);
+          if ((rows[0]?.revision || 0) !== input.revision) conflict();
+          const next = Number(input.revision) + 1;
+          await connection.execute('INSERT INTO company_directories (workspace_id,data,revision) VALUES (?,?,?) ON DUPLICATE KEY UPDATE data=VALUES(data),revision=VALUES(revision)',
+            [workspaceId, JSON.stringify(input.companies), next]);
+          return { revision: next };
+        });
+        send(res, 200, result); return;
+      }
       if (resource) {
         if (req.method === 'GET') {
           const result = await database.transaction(async connection => {

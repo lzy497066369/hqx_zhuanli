@@ -15,6 +15,7 @@ export type AiConfig = {
   secondFallbackBaseUrl?: string;
   secondFallbackApiKey?: string;
   timeoutMs?: number;
+  cadCheckpointDir?: string | false;
   workflowSigningKey?: string;
   image?: { baseUrl: string; apiKey: string; model: string; size?: string; timeoutMs?: number };
   /** 视觉理解模型：看四张彩色预览图编写 FreeCAD 脚本。缺省复用文本模型配置。 */
@@ -54,9 +55,37 @@ export class AiFailure extends Error {
   }
 }
 
-export async function responseText(response: Response, limit = 256 * 1024) {
+/** Bound waiting independently of a transport's own abort implementation. */
+export function awaitWithSignal<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return work;
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => { signal.removeEventListener('abort', onAbort); reject(signal.reason); };
+    signal.addEventListener('abort', onAbort, { once: true });
+    work.then(value => {
+      signal.removeEventListener('abort', onAbort);
+      if (signal.aborted) reject(signal.reason); else resolve(value);
+    }, error => { signal.removeEventListener('abort', onAbort); reject(error); });
+    if (signal.aborted) onAbort();
+  });
+}
+
+function bodyReader(response: Response, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   if (!response.body) throw new AiFailure(502, 'AI_EMPTY', 'AI 服务返回空内容，请稍后重试。');
   const reader = response.body.getReader();
+  // Some gateways/tee streams never acknowledge cancellation. Request it, but
+  // never await that acknowledgement on the generation/fallback critical path.
+  const cancel = () => { void reader.cancel().catch(() => {}); };
+  signal?.addEventListener('abort', cancel, { once: true });
+  return {
+    read: () => { signal?.throwIfAborted(); return awaitWithSignal(reader.read(), signal); },
+    close: () => { signal?.removeEventListener('abort', cancel); cancel(); try { reader.releaseLock(); } catch { /* A cancelled read may still be settling. */ } },
+  };
+}
+
+export async function responseText(response: Response, limit = 256 * 1024, signal?: AbortSignal) {
+  if (!response.body) throw new AiFailure(502, 'AI_EMPTY', 'AI 服务返回空内容，请稍后重试。');
+  const reader = bodyReader(response, signal);
   const chunks: Uint8Array[] = [];
   let size = 0;
   try {
@@ -67,7 +96,7 @@ export async function responseText(response: Response, limit = 256 * 1024) {
       if (size > limit) throw new AiFailure(502, 'AI_TOO_LARGE', 'AI 返回内容过长，请缩小技术方案范围后重试。');
       chunks.push(value);
     }
-  } finally { await reader.cancel().catch(() => {}); }
+  } finally { reader.close(); }
   return Buffer.concat(chunks).toString('utf8');
 }
 
@@ -82,24 +111,27 @@ const CHAT_STREAM_RAW_LIMIT = 16 * 1024 * 1024;
  * 同一请求 156 秒完整返回。SSE 里把 delta.content / delta.refusal 拼回去，finish_reason 取最后一个非空值。
  * 上游若忽略 stream 直接回 JSON，也按原来的方式解析。
  */
-export async function readChatChoice(response: Response): Promise<ChatChoice | undefined> {
+export async function readChatChoice(response: Response, onUsage?: (usage: unknown) => void, signal?: AbortSignal): Promise<ChatChoice | undefined> {
   const contentType = response.headers.get('Content-Type') || '';
   if (!contentType.includes('text/event-stream')) {
-    const envelope = JSON.parse(await responseText(response)) as { choices?: ChatChoice[] } | null;
+    const envelope = JSON.parse(await responseText(response, CHAT_CONTENT_LIMIT, signal)) as { choices?: ChatChoice[]; usage?: unknown } | null;
+    if (envelope?.usage) onUsage?.(envelope.usage);
     return envelope?.choices?.[0];
   }
   if (!response.body) throw new AiFailure(502, 'AI_EMPTY', 'AI 服务返回空内容，请稍后重试。');
-  const reader = response.body.getReader();
+  const reader = bodyReader(response, signal);
   const decoder = new TextDecoder();
-  let buffer = '', content = '', refusal = '', rawSize = 0, sawChoice = false;
+  let buffer = '', content = '', refusal = '', rawSize = 0, sawChoice = false, complete = false;
   let finishReason: string | undefined;
   const handleLine = (line: string) => {
     if (!line.startsWith('data:')) return;
     const data = line.slice(5).trim();
-    if (!data || data === '[DONE]') return;
-    let chunk: { error?: unknown; choices?: { delta?: { content?: unknown; refusal?: unknown }; finish_reason?: unknown }[] } | null;
+    if (data === '[DONE]') { complete = true; return; }
+    if (!data) return;
+    let chunk: { error?: unknown; usage?: unknown; choices?: { delta?: { content?: unknown; refusal?: unknown }; finish_reason?: unknown }[] } | null;
     try { chunk = JSON.parse(data); } catch { throw new AiFailure(502, 'AI_INVALID_JSON', 'AI 流式返回格式不正确，未采用该结果；请稍后重试。'); }
     if (chunk?.error) throw new AiFailure(502, 'AI_UPSTREAM', 'AI 服务调用失败，请检查服务状态、模型配置或稍后重试。');
+    if (chunk?.usage) onUsage?.(chunk.usage);
     const choice = chunk?.choices?.[0];
     if (!choice) return;
     sawChoice = true;
@@ -109,7 +141,7 @@ export async function readChatChoice(response: Response): Promise<ChatChoice | u
     if (content.length > CHAT_CONTENT_LIMIT) throw new AiFailure(502, 'AI_TOO_LARGE', 'AI 返回内容过长，请缩小技术方案范围后重试。');
   };
   try {
-    while (true) {
+    while (!complete) {
       const { value, done } = await reader.read();
       if (done) break;
       rawSize += value.length;
@@ -117,11 +149,11 @@ export async function readChatChoice(response: Response): Promise<ChatChoice | u
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() ?? '';
-      for (const line of lines) handleLine(line);
+      for (const line of lines) { handleLine(line); if (complete) break; }
     }
     buffer += decoder.decode();
-    if (buffer.trim()) handleLine(buffer);
-  } finally { await reader.cancel().catch(() => {}); }
+    if (!complete && buffer.trim()) handleLine(buffer);
+  } finally { reader.close(); }
   if (!sawChoice) throw new AiFailure(502, 'AI_EMPTY', 'AI 服务返回空内容，请稍后重试。');
   return { finish_reason: finishReason, message: { content, ...(refusal ? { refusal } : {}) } };
 }

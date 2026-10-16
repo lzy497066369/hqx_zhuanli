@@ -1,13 +1,14 @@
-import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto';
-import { promisify } from 'node:util';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RowDataPacket, PoolConnection } from 'mysql2/promise';
 import { MysqlDatabase } from './mysql/database.ts';
 import type { StorageConfig } from './mysql/database.ts';
 import { setRequestContext } from './requestContext.ts';
 import { ensurePersonalWorkspace, handleWorkspaces, WorkspaceFailure } from './workspaces.ts';
+import { hashPassword, verifyPassword } from './passwords.ts';
+import { handleAdmin, writeAiLog } from './adminApi.ts';
+import { withAiAudit } from './aiAudit.ts';
 
-const deriveKey = promisify(scrypt);
 const COOKIE = 'zhichuang_session';
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
 const DUMMY_HASH = `scrypt:${'0'.repeat(32)}:${'0'.repeat(128)}`;
@@ -53,17 +54,6 @@ function credentials(input: Record<string, unknown>) {
   if (typeof password !== 'string' || password.length < 8 || password.length > 128 || !password.trim()) throw new AuthFailure(400, 'INVALID_PASSWORD', '密码需为 8–128 位，不能只包含空格。');
   return { username, password };
 }
-async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16).toString('hex');
-  const key = await deriveKey(password, salt, 64) as Buffer;
-  return `scrypt:${salt}:${key.toString('hex')}`;
-}
-async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  const [, salt, digest] = hash.split(':');
-  if (!/^scrypt:[a-f0-9]{32}:[a-f0-9]{128}$/.test(hash)) return false;
-  const key = await deriveKey(password, salt, 64) as Buffer;
-  return timingSafeEqual(key, Buffer.from(digest, 'hex'));
-}
 function publicUser(row: RowDataPacket): AuthUser {
   return { id: row.id, username: row.username, displayName: row.display_name, role: row.role };
 }
@@ -108,7 +98,7 @@ export function createAuthMiddleware(config: StorageConfig, env: NodeJS.ProcessE
     const token = cookieToken(req);
     if (!database || !token) return null;
     await database.ready();
-    const [rows] = await database.pool.execute<RowDataPacket[]>('SELECT u.id,u.username,u.display_name,u.role FROM user_sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP(3)', [tokenHash(token)]);
+    const [rows] = await database.pool.execute<RowDataPacket[]>('SELECT u.id,u.username,u.display_name,u.role FROM user_sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP(3) AND u.disabled_at IS NULL', [tokenHash(token)]);
     return rows[0] ? publicUser(rows[0]) : null;
   }
   const middleware = async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
@@ -118,7 +108,10 @@ export function createAuthMiddleware(config: StorageConfig, env: NodeJS.ProcessE
     try {
       if (!sameOrigin(req, origins)) throw new AuthFailure(403, 'ORIGIN_NOT_ALLOWED', '只允许同源访问。');
       if (path === '/api/auth/me' && req.method === 'GET') { send(res, 200, { enabled, user: await currentUser(req) }); return; }
-      if (!enabled) { next(); return; }
+      if (!enabled) {
+        if (path === '/api/admin' || path.startsWith('/api/admin/')) throw new AuthFailure(403, 'ADMIN_REQUIRED', '仅管理员可以访问。');
+        next(); return;
+      }
       if (path === '/api/auth/register' || path === '/api/auth/login') {
         if (req.method !== 'POST') throw new AuthFailure(405, 'METHOD_NOT_ALLOWED', '请使用 POST 提交。');
         const input = await readBody(req);
@@ -140,12 +133,14 @@ export function createAuthMiddleware(config: StorageConfig, env: NodeJS.ProcessE
             });
             setCookie(req, res, token); send(res, 201, { user }); return;
           }
-          const [rows] = await database!.pool.execute<RowDataPacket[]>('SELECT id,username,display_name,password_hash,role FROM users WHERE username = ?', [username]);
+          const [rows] = await database!.pool.execute<RowDataPacket[]>('SELECT id,username,display_name,password_hash,role,disabled_at FROM users WHERE username = ?', [username]);
           const valid = await verifyPassword(password, rows[0]?.password_hash || DUMMY_HASH);
           if (!rows[0] || !valid) throw new AuthFailure(401, 'INVALID_CREDENTIALS', '账号或密码错误。');
+          if (rows[0].disabled_at) throw new AuthFailure(403, 'ACCOUNT_DISABLED', '账号已禁用，请联系管理员。');
           const user = publicUser(rows[0]);
           const token = await database!.transaction(async connection => {
-            await connection.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [user.id]);
+            const [current] = await connection.execute<RowDataPacket[]>('SELECT disabled_at,password_hash FROM users WHERE id = ? FOR UPDATE', [user.id]);
+            if (!current.length || current[0].disabled_at || current[0].password_hash !== rows[0].password_hash) throw new AuthFailure(401, 'INVALID_CREDENTIALS', '账号信息已变更，请重新登录。');
             return createSession(connection, user.id);
           });
           setCookie(req, res, token); send(res, 200, { user }); return;
@@ -162,6 +157,10 @@ export function createAuthMiddleware(config: StorageConfig, env: NodeJS.ProcessE
       const user = await currentUser(req);
       if (!user) throw new AuthFailure(401, 'AUTH_REQUIRED', '请先登录；登录已过期时请先备份未保存内容，再刷新登录。');
       setRequestContext(req, { userId: user.id });
+      if (path === '/api/admin' || path.startsWith('/api/admin/')) {
+        if (user.role !== 'admin') throw new AuthFailure(403, 'ADMIN_REQUIRED', '仅管理员可以访问。');
+        await handleAdmin(req, res, database!, user); return;
+      }
       if (path === '/api/workspaces' || path.startsWith('/api/workspaces/')) {
         await handleWorkspaces(req, res, database!, user.id, readBody); return;
       }
@@ -172,7 +171,11 @@ export function createAuthMiddleware(config: StorageConfig, env: NodeJS.ProcessE
         if (!rows.length) throw new AuthFailure(404, 'WORKSPACE_NOT_FOUND', '工作空间不存在或无权访问。');
         setRequestContext(req, { userId: user.id, workspaceId });
       }
-      next();
+      withAiAudit({ requestId: randomUUID(), userId: user.id, username: user.username,
+        workspaceId: typeof req.headers['x-workspace-id'] === 'string' ? req.headers['x-workspace-id'] : undefined,
+        route: path, clientIp: req.socket.remoteAddress || '', userAgent: String(req.headers['user-agent'] || '').slice(0,500),
+        clientStreaming: req.headers.accept?.includes('application/x-ndjson') === true, write: log => writeAiLog(database!, log),
+      }, next);
     } catch (error) {
       if (res.headersSent || res.destroyed) return;
       if (error instanceof AuthFailure || error instanceof WorkspaceFailure) send(res, error.status, { error: { code: error.code, message: error.message } });

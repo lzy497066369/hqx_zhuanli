@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { createPool } from 'mysql2/promise';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
+import { randomUUID } from 'node:crypto';
+import { hashPassword } from '../passwords.ts';
 
 export type StorageConfig = {
   driver: 'mysql' | 'indexeddb';
@@ -31,7 +33,8 @@ export class MysqlDatabase {
     this.pool = createPool({
       host: config.host, port: config.port, user: config.user, password: config.password, database: config.database,
       charset: 'utf8mb4', timezone: 'Z', connectionLimit: 5, connectTimeout: 5000,
-      waitForConnections: true, queueLimit: 20, enableKeepAlive: true,
+      // Let bursts wait for a connection instead of rejecting users before they reach the generation queue.
+      waitForConnections: true, queueLimit: 0, enableKeepAlive: true,
     });
   }
 
@@ -72,6 +75,22 @@ export class MysqlDatabase {
         await connection.execute('INSERT INTO schema_migrations (version, name) VALUES (3, ?)', ['private-user-workspaces']);
       }
       await connection.execute('INSERT IGNORE INTO workspaces (id) VALUES (?)', [this.workspace]);
+      const adminSql = await readFile(new URL('./admin.sql', import.meta.url), 'utf8');
+      for (const statement of adminSql.split(';').map(part => part.trim()).filter(Boolean)) await connection.query(statement);
+      const [adminMigrations] = await connection.execute<RowDataPacket[]>('SELECT version FROM schema_migrations WHERE version = 4');
+      if (!adminMigrations.length) {
+        const [userColumns] = await connection.query<RowDataPacket[]>('SHOW COLUMNS FROM users');
+        if (!userColumns.some(row => row.Field === 'disabled_at')) await connection.query('ALTER TABLE users ADD COLUMN disabled_at TIMESTAMP(3) NULL');
+        await connection.beginTransaction();
+        try {
+          // Seed once under the migration lock; later starts never reset a changed password.
+          const hash = await hashPassword('admin123');
+          await connection.execute("INSERT INTO users (id,username,display_name,password_hash,role) VALUES (?,'admin','管理员',?,'admin') ON DUPLICATE KEY UPDATE role = 'admin', password_hash = ?, disabled_at = NULL", [randomUUID(), hash, hash]);
+          await connection.execute("DELETE s FROM user_sessions s JOIN users u ON u.id = s.user_id WHERE u.username = 'admin'");
+          await connection.execute('INSERT INTO schema_migrations (version, name) VALUES (4, ?)', ['administrator-and-ai-request-audit']);
+          await connection.commit();
+        } catch (error) { await connection.rollback(); throw error; }
+      }
     } finally {
       if (locked) await connection.query('SELECT RELEASE_LOCK(?)', ['zhichuang-schema-v1']).catch(() => undefined);
       connection.release();

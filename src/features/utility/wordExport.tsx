@@ -9,6 +9,7 @@ import { FIGURE_DESCRIPTIONS, FIGURE_LABELS, PATENT_DRAWING_STYLE, SVG_FRAME } f
 import type { Figure } from "./drawingModel";
 import { fitWordImage, packPatentWord, patentSection, WORD_BODY as BODY, WORD_BODY_PARAGRAPH as BODY_PARAGRAPH, WORD_METADATA, WORD_STYLES, wordCaption, wordHeading, wordImageParagraph, wordTitle } from "./wordFormat";
 import { freezePatentPackage } from './patentPackage';
+import type { PatentExportDocument, PatentExportFigure } from '../export/patentDocument';
 
 function body(text: string) {
   return new Paragraph({ ...BODY_PARAGRAPH,
@@ -42,25 +43,39 @@ async function svgToPng(svg: string) {
   return { data: new Uint8Array(await blob.arrayBuffer()), width: canvas.width, height: canvas.height };
 }
 
-export async function createUtilityWordBlob(project: Project, drawing: UtilityDrawing, materials: UtilityMaterials) {
+export async function prepareUtilityPatentExport(project: Project, drawing: UtilityDrawing, materials: UtilityMaterials): Promise<PatentExportDocument> {
   if (!drawing.design) throw new Error("附图尚未生成，无法导出 Word。");
   if (!hasConfirmedUtilityStructure(project, drawing) || !drawing.design.structureModel) throw new Error("结构模型尚未确定或附图内容已过期，无法导出 Word。");
   const frozen = freezePatentPackage(project, drawing, materials);
   const final = frozen.document;
+  const figures: PatentExportFigure[] = [];
+  let abstractFigure: PatentExportFigure | undefined;
+  for (const { kind: figure, figureLabel } of final.figures) {
+    const png = await svgToPng(svgMarkup(frozen.project, frozen.drawing, figure));
+    const item = { ...png, label: figureLabel, description: FIGURE_DESCRIPTIONS[figure] };
+    figures.push(item);
+    if (figure === 'overall') abstractFigure = item;
+  }
+  if (!abstractFigure) throw new Error('缺少摘要附图，无法导出。');
+  return { title: final.title, abstract: final.abstract, claims: [...final.claims],
+    sections: final.sections.map(section => ({ title: section.title, paragraphs: [...section.paragraphs] })), figures, abstractFigure };
+}
+
+export async function createUtilityWordBlob(project: Project, drawing: UtilityDrawing, materials: UtilityMaterials) {
+  const final = await prepareUtilityPatentExport(project, drawing, materials);
   const specification: Paragraph[] = [wordTitle(final.title)];
   for (const section of final.sections) specification.push(wordHeading(section.title), ...section.paragraphs.map(body));
   const figures: Paragraph[] = [];
   let abstractFigure: Paragraph | undefined;
-  for (const { kind: figure, figureLabel } of final.figures) {
+  for (const png of final.figures) {
     // 摘要附图使用与图 1 相同的整体结构示意图（不再绘制 A 区域虚线框）。
     // 两者输入完全相同，复用同一份光栅化结果，无需再渲染一遍整体图。
-    const png = await svgToPng(svgMarkup(frozen.project, frozen.drawing, figure));
-    const image = (withCaption: boolean) => new ImageRun({ type: 'png', data: png.data, transformation: fitWordImage(png.width, png.height, withCaption), altText: { name: figureLabel, title: figureLabel, description: FIGURE_DESCRIPTIONS[figure] } });
-    if (figure === 'overall') {
-      abstractFigure = wordImageParagraph([new ImageRun({ type: 'png', data: png.data, transformation: fitWordImage(png.width, png.height, false), altText: { name: figureLabel, title: figureLabel, description: '摘要附图为整体结构示意图。' } })]);
+    const image = (withCaption: boolean) => new ImageRun({ type: 'png', data: png.data, transformation: fitWordImage(png.width, png.height, withCaption), altText: { name: png.label, title: png.label, description: png.description } });
+    if (png === final.abstractFigure) {
+      abstractFigure = wordImageParagraph([new ImageRun({ type: 'png', data: png.data, transformation: fitWordImage(png.width, png.height, false), altText: { name: png.label, title: png.label, description: '摘要附图为整体结构示意图。' } })]);
     }
     figures.push(wordImageParagraph([image(true)], figures.length > 0, true));
-    figures.push(wordCaption(figureLabel));
+    figures.push(wordCaption(png.label));
   }
   if (!abstractFigure) throw new Error('缺少摘要附图，无法导出 Word。');
   const document = new Document({

@@ -10,6 +10,7 @@ export default defineConfig(({ mode }) => {
   const env = { ...loadEnv(mode, process.cwd(), ''), ...process.env }
   const config = readAiConfig(env)
   return {
+    optimizeDeps: { include: ['pdf-lib', 'pdfmake/build/pdfmake'] },
     // Only a boolean reaches the client, never provider configuration or secrets.
     define: { 'import.meta.env.STRICT_AI_E2E': JSON.stringify(!!config.executionPolicy) },
     plugins: [react(), {

@@ -59,25 +59,30 @@ test('规则：保护客体必须是带有具体限定的实体装置或组件',
 async function fillAndGenerate(page: import('@playwright/test').Page) {
   await mockNaming(page, 'H型钢梁');
   await page.goto('/#utility');
+  await page.getByRole('button', { name: '使用已有特征拟名' }).click();
   await page.getByLabel('企业名称', { exact: false }).fill(company);
   await page.getByLabel('产品名称', { exact: false }).fill('钢材');
   await page.getByRole('button', { name: '生成产品建议' }).click();
   await expect(page.locator('.un-option')).toHaveCount(5);
   await page.getByRole('button', { name: 'H型钢梁', exact: true }).click();
+  const next = page.getByRole('button', { name: '下一步', exact: true });
+  await expect(page.locator('.un-structure-actions button')).toHaveCount(1);
+  await expect(next).toBeDisabled();
   await page.getByLabel('H型截面').check();
   await page.getByLabel('螺栓连接板').check();
   await page.getByRole('radio', { name: '形状与构造结合' }).check();
-  await page.getByRole('button', { name: '生成结构资料选项' }).click();
+  await page.getByRole('button', { name: '下一步', exact: true }).click();
+  await expect(next).toBeDisabled();
   for (const label of ['壳体与支架', '固定连接', '部件相对固定', '平板与方壳']) await page.getByRole('checkbox', { name: new RegExp(label) }).check();
-  await page.getByRole('button', { name: '确认所选结构资料' }).click();
-  await page.getByRole('button', { name: '确认选项并生成名称' }).click();
+  await expect(next).toBeEnabled();
+  await page.getByRole('button', { name: '下一步', exact: true }).click();
   await expect(page.locator('.un-candidate')).toHaveCount(3);
 }
 
 test('集成：产品建议、结构多选、名称换批、确认保存与刷新', async ({ page }) => {
   await fillAndGenerate(page);
   const before = await page.locator('.un-candidate').allTextContents();
-  await page.getByRole('button', { name: '换一批名称' }).click();
+  await page.getByRole('button', { name: '下一步', exact: true }).click();
   await expect(page.locator('.un-candidate')).toHaveCount(3);
   await expect.poll(() => page.locator('.un-candidate').allTextContents()).not.toEqual(before);
   await page.locator('.un-candidate').first().click();
@@ -139,6 +144,7 @@ test('集成：产品建议与名称生成期间在按钮上显示进度，结�
     await route.fulfill({ json: { candidates: Array.from({ length: 3 }, (_, index) => ({ name: `一种带${index}号连接板的H型钢梁`, product: 'H型钢梁', feature: 'H型截面', basis: '结构特征', inferred: false })) } });
   });
   await page.goto('/#utility');
+  await page.getByRole('button', { name: '使用已有特征拟名' }).click();
   await page.getByLabel('企业名称', { exact: false }).fill(company);
   await page.getByLabel('产品名称', { exact: false }).fill('钢材');
   await page.getByRole('button', { name: '生成产品建议' }).click();
@@ -151,10 +157,9 @@ test('集成：产品建议与名称生成期间在按钮上显示进度，结�
   await page.getByRole('button', { name: 'H型钢梁', exact: true }).click();
   await page.getByLabel('H型截面').check();
   await page.getByRole('radio', { name: '构造改进' }).check();
-  await page.getByRole('button', { name: '生成结构资料选项' }).click();
+  await page.getByRole('button', { name: '下一步', exact: true }).click();
   for (const label of ['壳体与支架', '固定连接', '部件相对固定', '平板与方壳']) await page.getByRole('checkbox', { name: new RegExp(label) }).check();
-  await page.getByRole('button', { name: '确认所选结构资料' }).click();
-  await page.getByRole('button', { name: '确认选项并生成名称' }).click();
+  await page.getByRole('button', { name: '下一步', exact: true }).click();
   const namesProgress = page.getByRole('progressbar', { name: '名称生成进度' });
   await expect(namesProgress).toBeVisible();
   await expect(page.getByRole('button', { name: '正在生成名称…' })).toBeDisabled();
@@ -170,6 +175,7 @@ test('系统：生成失败会清除按钮进度并允许重试', async ({ page 
     await route.fulfill({ status: 502, json: { error: { message: 'AI 暂时不可用' } } });
   });
   await page.goto('/#utility');
+  await page.getByRole('button', { name: '使用已有特征拟名' }).click();
   await page.getByLabel('企业名称', { exact: false }).fill(company);
   await page.getByLabel('产品名称', { exact: false }).fill('钢材');
   await page.getByRole('button', { name: '生成产品建议' }).click();
@@ -202,6 +208,7 @@ test('验收：四阶段中命名页三项进度展示真实服务端节点', as
     { name: '一种带螺栓连接板的H型钢梁', product: 'H型钢梁', feature: '螺栓连接板', basis: '结构资料', inferred: false },
   ] }));
   await page.goto('/#utility');
+  await page.getByRole('button', { name: '使用已有特征拟名' }).click();
   await page.getByLabel('企业名称', { exact: false }).fill(company);
   await page.getByLabel('产品名称', { exact: false }).fill('钢材');
   await page.getByRole('button', { name: '生成产品建议' }).click();
@@ -209,11 +216,10 @@ test('验收：四阶段中命名页三项进度展示真实服务端节点', as
   await page.getByRole('button', { name: 'H型钢梁', exact: true }).click();
   await page.getByLabel('螺栓连接板').check();
   await page.getByRole('radio', { name: '构造改进' }).check();
-  await page.getByRole('button', { name: '生成结构资料选项' }).click();
+  await page.getByRole('button', { name: '下一步', exact: true }).click();
   await expect(page.getByText('壳体与支架', { exact: true })).toBeVisible();
   for (const label of ['壳体与支架', '固定连接', '部件相对固定', '平板与方壳']) await page.getByRole('checkbox', { name: new RegExp(label) }).check();
-  await page.getByRole('button', { name: '确认所选结构资料' }).click();
-  await page.getByRole('button', { name: '确认选项并生成名称' }).click();
+  await page.getByRole('button', { name: '下一步', exact: true }).click();
   await expect(page.locator('.un-candidate')).toHaveCount(1);
   await expect(page.getByRole('progressbar')).toHaveCount(0);
 });

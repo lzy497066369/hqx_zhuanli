@@ -4,6 +4,7 @@ export default defineConfig({
   // These suites require the separate offline configs and an external artifact
   // directory with the network guard installed; they cannot run in the UI suite.
   testIgnore: [
+    '**/admin-workspace.spec.ts',
     '**/mysql-workspace.spec.ts',
     '**/auth-workspace.spec.ts',
     '**/private-workspaces.spec.ts',

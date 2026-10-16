@@ -5,28 +5,34 @@ import { Modal } from '../../components/Modal';
 import { GenerationProgress } from '../utility/generationProgress';
 import type { ProgressStep } from '../utility/generationProgress';
 import { progressRequest } from '../utility/progressRequest';
+import { TokenUsageSummary } from './TokenUsageSummary';
 import {
-  CAD_VIEWS, PREVIEW_VIEWS, applyConflictChoices, createProductWorkflow, hasCurrentCad, hasCurrentConfirmation,
+  PREVIEW_VIEWS, applyConflictChoices, createProductWorkflow, hasCurrentCad, hasCurrentConfirmation,
   hasCurrentImageFigures, hasCurrentPreview, isPreviewConfirmation, isProductBrief, isProductCad, isProductImage, isProductMaterials,
+  hasCurrentText,
   isProductPreview, isProductReview, isProductSelection, isProductWorkflowComplete, isRevisionDialogue, namingFingerprint, previewReference,
 } from './productWorkflow';
 import type { ProductReview, ProductWorkflow, RevisionResponse } from './productWorkflow';
+import { isTextStructure, isTextDraft, TEXT_RULES_VERSION } from './productText';
 import { PATENT_FIGURE_TEMPLATES } from './productPrompts';
-import { createProductWordBlob, previewImagesForVision, productImageBytes, productWordFilename } from './productWordExport';
+import { previewImagesForVision, productImageBytes } from './productWordExport';
+import { downloadExport, exportProductPatent } from '../export/patentExport';
+import type { PatentExportFormat } from '../export/patentExport';
 import './productWorkflow.css';
 import { workspaceHeaders } from '../../storage/workspaceContext';
 
 const PATH = '/api/product/';
 // CAD 阶段 = 视觉模型写脚本 + FreeCAD 建模 + 投影，比纯文本阶段更久，单独放宽客户端等待时间。
 const TEXT_WAIT_MS = 660000;
-const CAD_WAIT_MS = 900000;
+// 服务端 CAD 阶段总预算 1560 秒（server/productCad.ts 的 CAD_TOTAL_BUDGET_MS），客户端留出余量。
+const CAD_WAIT_MS = 1860000;
 const redrawDirections = [
   '保留结构，只优化外形', '用配色更清楚地区分部件', '重点结构表达更清晰', '四张视图布局更规整', '根据我的描述调整产品结构',
 ];
 type Task = { controller: AbortController; signal: AbortSignal; generationToken?: string };
 
-export function ProductWorkflowWorkspace({ project, onSave, onBack, visible = true }: {
-  project: Project; onSave: (projectId: string, workflow: ProductWorkflow) => void; onBack: () => void; visible?: boolean;
+export function ProductWorkflowWorkspace({ project, onSave, onBack, visible = true, managed = false }: {
+  project: Project; onSave: (projectId: string, workflow: ProductWorkflow) => void; onBack: () => void; visible?: boolean; managed?: boolean;
 }) {
   const formId = useId();
   const workspaceScope = useRef(workspaceHeaders()).current;
@@ -47,7 +53,7 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack, visible = tr
   const [directions, setDirections] = useState<string[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [loadedViews, setLoadedViews] = useState<string[]>([]);
-  const [exporting, setExporting] = useState(false);
+  const [exporting, setExporting] = useState<PatentExportFormat | null>(null);
   const hasPreview = hasCurrentPreview(workflow);
   const confirmed = hasCurrentConfirmation(workflow);
   const hasCad = hasCurrentCad(workflow);
@@ -110,14 +116,21 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack, visible = tr
     return token;
   }
   async function call<T>(stage: string, body: unknown, task: Task, waitMs = TEXT_WAIT_MS): Promise<T> {
+    if (stage === 'materials') waitMs = CAD_WAIT_MS;
     assertActive(task);
     const token = await reserveGeneration(task);
-    const stages: Record<string, string> = { review: '逻辑校验', brief: '生成产品简介', preview: '生成四张彩色预览', confirm: '确认预览', cad: '生成模型与专利附图', figure: '生成黑白结构图', materials: '生成申请文案', revise: '理解重画意见' };
+    const stages: Record<string, string> = { review: '逻辑校验', structure: '生成结构方案', brief: '复核结构并生成产品简介', draft: '生成申请正文', preview: '生成四张彩色预览', confirm: '确认预览', cad: '生成模型与专利附图', figure: '生成黑白结构图', materials: '复核申请文案', revise: '理解重画意见' };
     reportProgress(task, { label: stages[stage] || stage, detail: '正在处理，请稍候' });
     // 客户端等待必须长于服务端总预算（server/productWorkflowAi.ts 文本 600 秒、CAD 阶段另计），
     // 否则服务端还在生成时浏览器先中断，用户看不到服务端返回的具体原因。
     const response = await progressRequest<T>(PATH + stage, body, step => reportProgress(task, step),
-      AbortSignal.any([task.signal, AbortSignal.timeout(waitMs)]), { 'X-Generation-Token': token });
+      AbortSignal.any([task.signal, AbortSignal.timeout(waitMs)]), { 'X-Generation-Token': token }, usage => {
+        if (taskRef.current !== task || task.signal.aborted) return;
+        const current = stateRef.current;
+        if (current.tokenUsage?.some(record => record.id === usage.id)) return;
+        save({ tokenUsage: [...(current.tokenUsage || []), usage],
+          tokenUsageIncomplete: current.tokenUsageIncomplete || current.tokenUsage === undefined });
+      });
     assertActive(task);
     return response.data;
   }
@@ -137,6 +150,8 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack, visible = tr
     catch (cause) {
       if (task.generationToken) releaseGeneration(task.generationToken);
       if (!task.signal.aborted && taskRef.current === task) {
+        // 本轮的失败不清空任何已生成成果：正文、预览、附图和检查点都留在页面上，
+        // 服务端检查点也保留失败原因，重试时接着修，不需要从头付费生成。
         // 服务端附带的具体原因（如模型输出未通过校验的条目）一并展示，便于判断是重试还是改选择。
         const details = (cause as { details?: unknown })?.details;
         const suffix = Array.isArray(details) && details.length ? `（${details.filter(item => typeof item === 'string').slice(0, 4).join('；')}）` : '';
@@ -158,10 +173,17 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack, visible = tr
     if (review.verdict !== 'feasible') return;
     let brief = stateRef.current.brief;
     if (!brief || brief.reviewId !== review.id) {
-      const result = await call<unknown>('brief', { review }, task);
+      let structure = stateRef.current.textStructure;
+      if (!structure || structure.reviewId !== review.id || structure.rulesVersion !== TEXT_RULES_VERSION) {
+        const result = await call<unknown>('structure', { review }, task);
+        if (!isTextStructure(result) || result.reviewId !== review.id) throw new Error('结构方案版本不匹配，请重试。');
+        structure = result;
+        commit(task, { textStructure: structure, textDraft: undefined });
+      }
+      const result = await call<unknown>('brief', { review, structure }, task);
       if (!isProductBrief(result) || result.reviewId !== review.id) throw new Error('产品简介格式或来源版本不正确，请重试。');
       brief = result;
-      commit(task, { brief, previews: undefined, preview: undefined, cad: undefined, confirmation: undefined, materials: undefined, figures: {} });
+      commit(task, { brief, textDraft: undefined, previews: undefined, preview: undefined, cad: undefined, confirmation: undefined, materials: undefined, figures: {} });
     }
     const result = await call<unknown>('preview', { brief }, task);
     if (!isProductPreview(result) || result.briefId !== brief.id || !PREVIEW_VIEWS.every(view => result.images.some(image => image.templateId === view.templateId))) throw new Error('彩色预览内容或版本无效，未替换已有成果。');
@@ -173,7 +195,7 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack, visible = tr
     const result = await call<unknown>('review', body, task);
     if (!isProductReview(result)) throw new Error('逻辑校验结果不完整，请重新校验。');
     commit(task, { selection: result.selection, review: result, brief: undefined, previews: undefined, preview: undefined,
-      cad: undefined, confirmation: undefined, materials: undefined, figures: {}, revision: undefined });
+      cad: undefined, confirmation: undefined, materials: undefined, textStructure: undefined, textDraft: undefined, figures: {}, revision: undefined });
     setResolutions({});
     if (result.verdict === 'conflicts') { setNotice('发现需要取舍的矛盾，请逐项选择处理方案后重新校验。'); return; }
     await finishPreview(task, result);
@@ -184,17 +206,19 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack, visible = tr
     else await reviewAndPreview(task, { selection: current.selection });
   }
   /** 确认之后就按同一份简介生成：先用 FreeCAD 出统一模型和专利附图，再按这份附图清单生成文案。 */
-  async function finalStages(task: Task, mode: 'cad' | 'ai-figure') {
+  /** refreshCad 让已经生成过的附图按检查点重跑 CAD 阶段：只有图文核对指出的问题被修正，
+   *  页面上原来的附图在修正成功前一直保留。 */
+  async function finalStages(task: Task, mode: 'cad' | 'ai-figure', drawingRepairs = 0, refreshCad = false): Promise<void> {
     const current = stateRef.current;
     if (!hasCurrentConfirmation(current)) throw new Error('请先确认当前版本的四张彩色预览。');
     const brief = current.brief!;
     const confirmation = current.confirmation!;
-    if (!hasCurrentCad(current) && !hasCurrentImageFigures(current, PATENT_FIGURE_TEMPLATES.map(template => template.id))) {
+    if (refreshCad || !hasCurrentCad(current) || current.cad?.drawingVersion !== 1) {
       if (mode === 'cad') {
         const images = await previewImagesForVision(current.previews!);
         const cad = await call<unknown>('cad', { brief, confirmation, images }, task, CAD_WAIT_MS);
         if (!isProductCad(cad) || cad.briefId !== brief.id || !cad.views.length) throw new Error('CAD 统一模型或附图内容无效，未采用该结果。');
-        commit(task, { cad });
+        commit(task, { cad, materials: undefined });
       } else {
         for (const template of PATENT_FIGURE_TEMPLATES) {
           if (stateRef.current.figures[template.id]?.briefId === brief.id) continue;
@@ -204,14 +228,34 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack, visible = tr
         }
       }
     }
-    if (stateRef.current.materials?.briefId !== brief.id) {
-      const figureIds = hasCurrentCad(stateRef.current) ? CAD_VIEWS.map(view => `cad-${view.id}`) : PATENT_FIGURE_TEMPLATES.map(template => template.id);
-      const result = await call<unknown>('materials', { brief, confirmation, figureIds }, task);
+    if (!hasCurrentCad(stateRef.current)) throw new Error('AI 黑白参考图已保存；它尚未通过完整标号和结构核对，不能作为成品导出。请重试专利附图生成。');
+    if (!hasCurrentText(stateRef.current) || stateRef.current.materials?.textRecord?.status === 'needs_review') {
+      const figureIds = hasCurrentCad(stateRef.current) ? stateRef.current.cad!.views.map(view => `cad-${view.view}`) : PATENT_FIGURE_TEMPLATES.map(template => template.id);
+      let draft = stateRef.current.textDraft;
+      if (!draft || draft.briefId !== brief.id || (brief.technicalSource && draft.sourceVersion !== brief.technicalSource.version)) {
+        const result = await call<unknown>('draft', { brief, confirmation }, task);
+        if (!isTextDraft(result) || result.briefId !== brief.id) throw new Error('正文草稿版本不匹配，请重试。');
+        draft = result; commit(task, { textDraft: draft });
+      }
+      const previousMaterials = stateRef.current.materials?.textRecord?.status === 'needs_review' ? stateRef.current.materials : undefined;
+      let result: unknown;
+      try {
+        result = await call<unknown>('materials', { brief, confirmation, figureIds, cad: stateRef.current.cad, draft, ...(previousMaterials ? { previousMaterials } : {}) }, task);
+      } catch (cause) {
+        if (task.signal.aborted || (cause as { code?: string })?.code !== 'CAD_VISUAL_MISMATCH' || drawingRepairs >= 1) throw cause;
+        // The server checkpoint keeps the reviewed prose and the concrete findings.
+        // Keep the current drawings on screen and re-run the CAD stage against that
+        // checkpoint, so only what actually failed is repaired before the final
+        // text/drawing review runs again.
+        commit(task, { materials: undefined });
+        reportProgress(task, { label: '修正最终图文核对问题', detail: `保留已生成正文，修正附图后重新核对（${drawingRepairs + 1}/1）` });
+        return finalStages(task, 'cad', drawingRepairs + 1, true);
+      }
       if (!isProductMaterials(result) || result.briefId !== brief.id || result.title !== brief.design.title) throw new Error('申请文案版本不匹配，请重试文案生成。');
       commit(task, { materials: result });
     }
     setNotice(hasCurrentCad(stateRef.current)
-      ? 'FreeCAD 统一模型、专利附图与申请文案已生成，可以下载包含实际附图和建模记录的 Word 文档。'
+      ? 'FreeCAD 统一模型、专利附图与申请文案已生成，可以下载包含实际附图的 Word 文档。'
       : 'AI 黑白结构图与申请文案已生成（未使用 FreeCAD），可以下载 Word 文档。');
     if (task.generationToken) releaseGeneration(task.generationToken);
   }
@@ -224,7 +268,7 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack, visible = tr
     commit(task, { confirmation });
     await finalStages(task, 'cad');
   });
-  const buildWithoutFreeCad = () => void run('改用 AI 黑白结构图生成成品', task => finalStages(task, 'ai-figure'));
+  const buildWithoutFreeCad = () => void run('生成 AI 黑白参考图', task => finalStages(task, 'ai-figure'));
   const resolveConflicts = () => void run('应用取舍并重新校验', async task => {
     const review = stateRef.current.review;
     if (!review || review.verdict !== 'conflicts') return;
@@ -242,13 +286,13 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack, visible = tr
     if (response?.status !== 'ready' || !isProductSelection(response.selection)) throw new Error('重画回复不完整，请重新提交意见。');
     const previous = { ...current }; delete previous.previous; delete previous.revision;
     commit(task, { previous, selection: response.selection, review: undefined, brief: undefined, previews: undefined, preview: undefined,
-      cad: undefined, confirmation: undefined, materials: undefined, figures: {}, revision: undefined, redrawCount: current.redrawCount + 1 });
+      cad: undefined, confirmation: undefined, materials: undefined, textStructure: undefined, textDraft: undefined, figures: {}, revision: undefined, redrawCount: current.redrawCount + 1 });
     setRedrawOpen(false); setRedrawText(''); setDirections([]); setAnswers({});
     await reviewAndPreview(task, { selection: response.selection });
   });
   const restartFromReview = () => void run('重新校验当前产品', async task => {
     const current = stateRef.current;
-    if (hasCurrentPreview(current)) {
+    if (hasCurrentPreview(current) || current.textStructure || current.textDraft) {
       const previous = { ...current }; delete previous.previous; delete previous.revision;
       commit(task, { previous });
     }
@@ -260,22 +304,25 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack, visible = tr
     // Preserve the number of attempted redraws; there is no maximum.
     save({ ...previous, review: previous.review, brief: previous.brief, previews: previous.previews, preview: previous.preview,
       cad: previous.cad, confirmation: previous.confirmation, materials: previous.materials, figures: previous.figures,
-      revision: undefined, previous: undefined, generation: undefined, redrawCount: stateRef.current.redrawCount });
+      textStructure: previous.textStructure, textDraft: previous.textDraft,
+      revision: undefined, previous: undefined, generation: undefined, redrawCount: stateRef.current.redrawCount,
+      tokenUsage: stateRef.current.tokenUsage, tokenUsageIncomplete: stateRef.current.tokenUsageIncomplete });
     setLoadedViews([]); setError(''); setNotice('已恢复上一版产品简介和预览，未重新调用生图模型。');
   };
-  const exportWord = async () => {
+  const exportDocument = async (format: PatentExportFormat) => {
     if (exporting) return;
-    setExporting(true); setError('');
+    setExporting(format); setError('');
+    const snapshot = structuredClone(stateRef.current);
+    const label = format === 'pdf' ? 'PDF' : 'Word';
     try {
-      const blob = await createProductWordBlob(stateRef.current);
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a'); anchor.href = url; anchor.download = productWordFilename(stateRef.current);
-      anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setNotice(hasCurrentCad(stateRef.current)
-        ? 'Word 文档已导出：摘要、权利要求书、说明书和 4 张由 FreeCAD 统一模型投影的专利附图；使用前请专业核实。'
-        : 'Word 文档已导出：摘要、权利要求书、说明书和 AI 黑白结构图；使用前请专业核实。');
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Word 导出失败。'); }
-    finally { setExporting(false); }
+      downloadExport(await exportProductPatent(snapshot, format));
+    setNotice(snapshot.materials?.textRecord?.status === 'needs_review'
+      ? '文本初稿已生成，仍有待复核问题；可展开文本复核记录查看并继续修正。'
+      : hasCurrentCad(snapshot)
+        ? `${label} 文档已导出：摘要、权利要求书、说明书和 ${snapshot.cad!.views.length} 张专利附图；使用前请专业核实。`
+        : `${label} 文档已导出：摘要、权利要求书、说明书和 AI 黑白结构图；使用前请专业核实。`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : `${label} 导出失败。`); }
+    finally { setExporting(null); }
   };
 
   useEffect(() => {
@@ -293,13 +340,14 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack, visible = tr
   }, [project.id]);
 
   useEffect(() => {
-    if (visible) window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
-  }, [visible]);
+    if (visible && !managed) window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [visible, managed]);
 
   return <div className="product-workflow" data-testid="product-workflow">
-    <button className="un-back" onClick={() => { if (busy) cancel(); releaseGeneration(); onBack(); }}><ArrowLeft size={16} />返回修改名称与特征</button>
+    <button className="un-back" onClick={() => { if (!managed) { if (busy) cancel(); releaseGeneration(); } onBack(); }}><ArrowLeft size={16} />{managed ? '返回项目列表' : '返回修改名称与特征'}</button>
     <header className="pw-heading"><div><div className="un-eyebrow">PRODUCT STUDIO · {workflow.selection.patentType === 'invention' ? '发明专利' : '实用新型'}</div>
       <h1>{title}</h1></div></header>
+    {(complete || !!workflow.tokenUsage?.length) && <TokenUsageSummary records={workflow.tokenUsage} incomplete={workflow.tokenUsageIncomplete} />}
     <ol className="pw-steps" aria-label="产品生成流程">{['逻辑校验与去矛盾', '详细产品简介', '四张彩色预览与重画', '确认并生成成品'].map((label, index) =>
       <li key={label} className={index < activeStep || complete ? 'done' : index === activeStep ? 'active' : ''} aria-current={index === activeStep ? 'step' : undefined}>
         <span>{index < activeStep || complete ? <Check size={16} /> : `0${index + 1}`}</span><strong>{label}</strong></li>)}</ol>
@@ -317,7 +365,7 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack, visible = tr
       <button className="button primary" disabled={!!busy || conflictReview.conflicts.some(conflict => !resolutions[conflict.id])} onClick={resolveConflicts}><ShieldCheck size={16} />应用选择并重新校验</button>
       <p className="pw-muted">只应用你明确选择的删改；重新检查通过后，才会生成简介和图片。</p></section>}
     <div className="pw-layout"><div className="pw-main">
-      <section className="pw-panel" aria-labelledby={`${formId}-preview-title`}><div className="pw-section-head"><Image size={21} /><div><h2 id={`${formId}-preview-title`}>彩色产品预览（4 张）</h2><p>先生成主体图，再依据主体图生成前视图、俯视图和右视图，保持同一套结构与配色</p></div><span className="pw-tag">{workflow.redrawCount ? `已重画 ${workflow.redrawCount} 次` : '初次预览'}</span></div>
+      <section className="pw-panel" aria-labelledby={`${formId}-preview-title`}><div className="pw-section-head"><Image size={21} /><div><h2 id={`${formId}-preview-title`}>彩色产品预览（4 张）</h2></div><span className="pw-tag">{workflow.redrawCount ? `已重画 ${workflow.redrawCount} 次` : '初次预览'}</span></div>
         {hasPreview ? <><div className="pw-previews">{PREVIEW_VIEWS.map(view => {
           const image = workflow.previews!.images.find(item => item.templateId === view.templateId)!;
           const loadKey = `${workflow.previews!.id}:${view.id}`;
@@ -327,30 +375,37 @@ export function ProductWorkflowWorkspace({ project, onSave, onBack, visible = tr
         })}</div>
           <div className="pw-actions"><button className="button primary" disabled={!!busy || confirmed || !allViewsLoaded} onClick={confirmPreview}><CheckCheck size={17} />{confirmed ? '已确认此预览' : '确认预览并生成成品'}</button>
             <button className="button secondary" disabled={!!busy} onClick={() => setRedrawOpen(true)}><RotateCcw size={16} />{workflow.revision ? '继续补充重画意见' : '重新画'}</button></div>
-          <div className="pw-actions">{PATENT_FIGURE_TEMPLATES.map(template => <button key={template.id} className="button secondary" disabled={!!busy || !confirmed || hasCurrentImageFigures(workflow, [template.id])} onClick={buildWithoutFreeCad}><FileText size={15} />改用 AI 黑白结构图</button>)}</div>
+          <div className="pw-actions">{PATENT_FIGURE_TEMPLATES.map(template => <button key={template.id} className="button secondary" disabled={!!busy || !confirmed || hasCurrentImageFigures(workflow, [template.id])} onClick={buildWithoutFreeCad}><FileText size={15} />生成 AI 黑白参考图</button>)}</div>
           {workflow.preview && <p className="pw-muted">已保留旧版单张三视图预览作对照，它不参与确认，也不会用于最终文档。</p>}</>
           : <div className="pw-empty"><Sparkles size={34} /><strong>{conflictReview ? '消除矛盾后生成预览' : busy ? '正在生成主体图及其三个视图' : '继续生成当前产品预览'}</strong><p>不会用占位图或旧版几何图冒充生图结果。</p>
             {!busy && !conflictReview && <button className="button primary" disabled={!isProductSelection(workflow.selection)} onClick={() => void run('继续生成产品预览', continuePreview)}>{workflow.review ? '继续生成预览' : '检查逻辑并生成预览'}</button>}</div>}
         {workflow.previous && <button className="pw-restore" disabled={!!busy} onClick={restorePrevious}><RotateCcw size={14} />放弃本次修改，恢复上一版预览</button>}
       </section>
-      <section className="pw-panel" aria-labelledby={`${formId}-final-title`}><div className="pw-section-head"><Cuboid size={21} /><div><h2 id={`${formId}-final-title`}>最终文档与专利附图</h2><p>FreeCAD 统一模型投影出立体图与三视图，作为说明书附图写入 Word</p></div>{complete && <span className="pw-tag success">已完成</span>}</div>
+      <section className="pw-panel" aria-labelledby={`${formId}-final-title`}><div className="pw-section-head"><Cuboid size={21} /><div><h2 id={`${formId}-final-title`}>最终文档与专利附图</h2></div>{complete && <span className="pw-tag success">已完成</span>}</div>
         {!confirmed ? <p className="pw-muted">请先确认彩色预览。在此之前不会生成 CAD 模型、文案或附图。</p> : <>
           <ul className="pw-deliverables"><li>{workflow.materials ? <Check size={16} /> : <FileText size={16} />}申请文案 {workflow.materials ? '已生成' : '待生成'}</li>
-            {CAD_VIEWS.map(view => <li key={view.id}>{workflow.cad?.views.some(item => item.view === view.id) ? <Check size={16} /> : <Cuboid size={16} />}{view.title} {workflow.cad?.views.some(item => item.view === view.id) ? '已生成' : '待生成'}</li>)}
-            {PATENT_FIGURE_TEMPLATES.map(template => workflow.figures[template.id] && <li key={template.id}><Check size={16} />{template.title}（AI 备用图）已生成</li>)}</ul>
+            {workflow.cad ? workflow.cad.views.map((view, i) => <li key={view.view}><Check size={16} />图{i + 1} {view.title} 已生成</li>) : <li><Cuboid size={16} />按产品结构生成必要附图</li>}
+            {PATENT_FIGURE_TEMPLATES.map(template => workflow.figures[template.id] && <li key={template.id}><Check size={16} />{template.title}（AI 参考图）已生成</li>)}</ul>
           {hasCad && <details className="pw-details" open><summary>查看 FreeCAD 专利附图与建模说明</summary>
             <p className="pw-muted">FreeCAD {workflow.cad!.freecadVersion} · 三角面 {workflow.cad!.triangleCount} 个</p>
             <p>{workflow.cad!.summary}</p>
             {!!workflow.cad!.assumptions.length && <ul className="pw-choices">{workflow.cad!.assumptions.map(item => <li key={item}>{item}</li>)}</ul>}
-            {CAD_VIEWS.map(view => { const drawing = workflow.cad!.views.find(item => item.view === view.id); if (!drawing) return null;
-              return <div key={view.id}><h3>{view.title}</h3><img className="pw-patent-image" src={`data:image/svg+xml;utf8,${encodeURIComponent(drawing.svg)}`} alt={`${title}的${view.title}专利附图`} /></div>; })}</details>}
+            {workflow.cad!.views.map((drawing, index) => { const view = { id: drawing.view, title: drawing.title };
+              return <div key={view.id}><h3>图{index + 1} {view.title}</h3><img className="pw-patent-image" src={`data:image/svg+xml;utf8,${encodeURIComponent(drawing.svg)}`} alt={`${title}的${view.title}专利附图`} /></div>; })}</details>}
           {PATENT_FIGURE_TEMPLATES.map(template => workflow.figures[template.id] && <details className="pw-details" key={template.id}><summary>查看 AI 黑白{template.title}</summary><img className="pw-patent-image" src={workflow.figures[template.id].dataUrl} alt={template.title} /></details>)}
           {workflow.materials && <details className="pw-details"><summary>查看申请材料正文</summary><h3>摘要</h3><p>{workflow.materials.abstract}</p><h3>权利要求</h3>{workflow.materials.claims.map(claim => <p key={claim}>{claim}</p>)}
             {([['技术领域', 'technicalField'], ['背景技术', 'background'], ['内容', 'content'], ['附图说明', 'drawings'], ['具体实施方式', 'embodiment']] as const).map(([heading, key]) => <div key={key}><h3>{heading}</h3><p className="pw-prose">{workflow.materials![key]}</p></div>)}</details>}
-          {!complete && !busy && <div className="pw-actions"><button className="button secondary" onClick={() => void run(hasCad ? '补齐未完成的文案' : '重试未完成的文案或附图', task => finalStages(task, hasCad ? 'cad' : 'ai-figure'))}><RotateCcw size={15} />重试未完成的文案或附图</button></div>}
+          {workflow.materials?.textRecord && <details className="pw-details"><summary>查看文本复核记录{workflow.materials.textRecord.status === 'needs_review' ? '（仍有待复核问题）' : ''}</summary>
+            {workflow.materials.textRecord.review.findings.map((f, i) => <p key={i}>{f.location}：{f.issue}；{f.resolution}</p>)}
+            {workflow.materials.textRecord.review.unresolved.map((item, i) => <p key={i}>{item}</p>)}
+            {workflow.materials.textRecord.status === 'needs_review' && <button className="button secondary" disabled={!!busy} onClick={() => void run('继续复核申请文案', task => finalStages(task, 'cad'))}>继续复核文案</button>}
+          </details>}
+          {!complete && !busy && <div className="pw-actions"><button className="button secondary" onClick={() => void run(hasCad ? '补齐未完成的文案' : '重试未完成的文案或附图', task => finalStages(task, 'cad'))}><RotateCcw size={15} />重试未完成的文案或附图</button></div>}
         </>}
-        <div className="pw-actions"><button className="button primary" disabled={!complete || !!busy || exporting} onClick={() => void exportWord()}><Download size={16} />{exporting ? '正在打包 Word…' : '下载 Word 成品（.docx）'}</button></div>
-        <p className="pw-muted">Word 嵌入实际黑白图片，不依赖临时图片网址；FreeCAD 附图为真实投影线稿，不是生成图片。</p>
+        <div className="pw-actions">
+          <button className="button primary" disabled={!complete || !!busy || !!exporting} onClick={() => void exportDocument('word')}><Download size={16} />{exporting === 'word' ? '正在打包 Word…' : '下载 Word 成品（.docx）'}</button>
+          <button className="button secondary" disabled={!complete || !!busy || !!exporting} onClick={() => void exportDocument('pdf')}><Download size={16} />{exporting === 'pdf' ? '正在生成 PDF…' : '下载 PDF 成品（.pdf）'}</button>
+        </div>
       </section>
     </div><aside className="pw-side">
       <section className="pw-panel"><h2>当前生效选择</h2><p className="pw-muted">{workflow.selection.company} · {workflow.selection.product}</p><ul className="pw-choices">{workflow.selection.choices.map(choice => <li key={choice.id}>{choice.text}</li>)}</ul>{workflow.selection.visualPreferences && <p className="pw-prose">绘图要求：{workflow.selection.visualPreferences}</p>}</section>

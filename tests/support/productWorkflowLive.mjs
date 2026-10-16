@@ -69,7 +69,9 @@ let state;
 try { state = JSON.parse(await fs.readFile(file, 'utf8')); }
 catch { state = { version: 2, sourceFingerprint: 'live-product-smoke-only', selection, figures: {}, redrawCount: 0, updatedAt: new Date().toISOString() }; }
 const save = async () => { state.updatedAt = new Date().toISOString(); await fs.writeFile(file, JSON.stringify(state, null, 2)); await fs.writeFile(path.join(root, 'live-request-summary.json'), JSON.stringify(requests, null, 2)); };
-const signal = AbortSignal.timeout(900000);
+// The CAD stage is allowed up to 18 minutes server-side (CAD_TOTAL_BUDGET_MS), so
+// the whole-run budget has to be raisable for live CAD verification.
+const signal = AbortSignal.timeout(Number(process.env.PRODUCT_LIVE_TIMEOUT_MS) || 900000);
 const progress = (label, detail) => console.log(`${label}: ${detail}`);
 try {
   if (!state.review) { state.review = await service(PRODUCT_PATHS.review, { selection: state.selection }, signal, progress); state.selection = state.review.selection; await save(); }
@@ -83,13 +85,14 @@ try {
   if (!state.confirmation && process.env.PRODUCT_LIVE_REQUIRE_CONFIRM === '1' && process.env.PRODUCT_LIVE_ALLOW_CONFIRM !== '1') throw new Error('Preview saved. Inspect it and explicitly allow this synthetic test confirmation before continuing.');
   if (!state.confirmation) { state.confirmation = await service(PRODUCT_PATHS.confirm, { brief: state.brief, preview: previewReference(state.previews), confirmed: true }, signal); await save(); }
   // 先出 FreeCAD 统一模型与附图，再按实际附图清单生成文案；FreeCAD 不可用时改用 AI 黑白结构图。
-  if (!state.cad && !state.figures['patent-structure']) {
+  if (!state.cad || state.cad.drawingVersion !== 1) {
     try { state.cad = await service(PRODUCT_PATHS.cad, { brief: state.brief, confirmation: state.confirmation, images: state.previews.images.map(image => ({ templateId: image.templateId, dataUrl: image.dataUrl })) }, signal, progress); await save(); }
     catch (error) { if (error.code !== 'FREECAD_UNAVAILABLE') throw error; console.warn('FreeCAD unavailable; falling back to the AI structure figure.'); }
   }
   if (!state.cad && !state.figures['patent-structure']) { state.figures['patent-structure'] = await service(PRODUCT_PATHS.figure, { brief: state.brief, confirmation: state.confirmation, templateId: 'patent-structure' }, signal, progress); await save(); }
+  if (!state.cad || state.cad.drawingVersion !== 1) throw new Error('Reference image saved; verified patent drawings are still required.');
   const figureIds = state.cad ? state.cad.views.map(view => `cad-${view.view}`) : ['patent-structure'];
-  if (!state.materials) { state.materials = await service(PRODUCT_PATHS.materials, { brief: state.brief, confirmation: state.confirmation, figureIds }, signal, progress); await save(); }
+  if (!state.materials) { state.materials = await service(PRODUCT_PATHS.materials, { brief: state.brief, confirmation: state.confirmation, cad: state.cad, figureIds }, signal, progress); await save(); }
   if (state.cad) for (const view of state.cad.views) await fs.writeFile(path.join(root, `live-cad-${view.view}.svg`), view.svg);
   const figure = state.figures['patent-structure'];
   if (figure) await fs.writeFile(path.join(root, 'live-patent-structure.' + (figure.mimeType === 'image/png' ? 'png' : figure.mimeType === 'image/jpeg' ? 'jpg' : 'webp')), Buffer.from(figure.dataUrl.split(',')[1], 'base64'));

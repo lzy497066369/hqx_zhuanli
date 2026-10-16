@@ -3,6 +3,7 @@ dist
 playwright-report
 test-results
 artifacts
+.deploy-backups.local
 .git
 .env
 .env.*

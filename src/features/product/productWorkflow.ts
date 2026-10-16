@@ -1,6 +1,13 @@
 import type { Project } from '../../data.ts';
 import { CAD_VIEWS, PATENT_FIGURE_TEMPLATES, PREVIEW_VIEWS } from './productPrompts.ts';
-import type { CadViewId } from './productPrompts.ts';
+import { drawingCoverageErrors, drawingManifestDigest, drawingPlanErrors } from './productDrawing.ts';
+import type { DrawingPlan, DrawingAnnotation } from './productDrawing.ts';
+import { isTokenUsage } from './tokenUsage.ts';
+import type { TokenUsage } from './tokenUsage.ts';
+import { isTextStructure, isTextDraft, isFrozenTechnicalSource, isTextRecord, checkTextDocument, documentContent } from './productText.ts';
+import type { FrozenTechnicalSource, TextStructure, TextDraft, TextRecord } from './productText.ts';
+import { isProblemSelection } from './productProblems.ts';
+import type { ProblemSelection } from './productProblems.ts';
 
 export const LOGIC_DIMENSIONS = {
   identity: '名称与保护客体', structure: '部件与连接', motion: '固定与运动',
@@ -12,6 +19,7 @@ export type ProductSelection = {
   company: string; business: string; product: string; proposedName: string;
   patentType: 'utility' | 'invention'; improvementType: string;
   choices: ProductChoice[]; visualPreferences: string;
+  selectedProblem?: ProblemSelection;
 };
 export type ChoiceChanges = { removeIds: string[]; replacements: { id: string; text: string }[]; proposedName?: string };
 export type ConflictOption = ChoiceChanges & { id: string; label: string; explanation: string };
@@ -30,6 +38,7 @@ export type ProductDesign = {
 };
 export type ProductBrief = {
   id: string; reviewId: string; selection: ProductSelection; design: ProductDesign; description: string;
+  technicalSource?: FrozenTechnicalSource;
   createdAt: string; signature: string;
 };
 export type ProductImageRef = {
@@ -37,17 +46,20 @@ export type ProductImageRef = {
   mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; digest: string; createdAt: string; signature: string;
 };
 export type ProductImage = ProductImageRef & { dataUrl: string; prompt: string; model: string };
-// 彩色预览先生成主体图，再以它为参考并行生成三个视图；视角定义集中在 productPrompts.ts。
+// 彩色预览先生成主体图，再以它为参考依次生成三个视图；视角定义集中在 productPrompts.ts。
 export { PREVIEW_VIEWS, CAD_VIEWS, FIGURE_CATALOG } from './productPrompts.ts';
 export type { CadViewId } from './productPrompts.ts';
 export type ProductPreviewRef = {
   id: string; briefId: string; viewIds: string[]; digest: string; createdAt: string; signature: string;
 };
 export type ProductPreview = ProductPreviewRef & { images: ProductImage[] };
-export type CadViewDrawing = { view: CadViewId; title: string; svg: string; width: number; height: number; digest: string };
+export type CadViewDrawing = { view: string; annotations?: DrawingAnnotation[]; title: string; svg: string; width: number; height: number; digest: string };
 /** 部件标号锚点：视觉模型在脚本坐标系中给出的部件外表面一点，投影时吸附到模型表面。 */
 export type CadLabel = { number: string; name: string; point: [number, number, number] };
 export type ProductCad = {
+  drawingVersion?: 1; drawingPlan?: DrawingPlan;
+  generationModel?: string;
+  visualReview?: { status: 'passed'; summary: string; figureIds: string[] };
   id: string; briefId: string; script: string; summary: string; assumptions: string[];
   labels: CadLabel[]; keyStructure?: { point: [number, number, number]; radius: number };
   meshDigest: string; vertexCount: number; triangleCount: number; freecadVersion: string;
@@ -60,7 +72,7 @@ export type ProductDocumentContent = {
   abstract: string; claims: string[]; technicalField: string; background: string;
   content: string; drawings: string; embodiment: string;
 };
-export type ProductMaterials = ProductDocumentContent & { briefId: string; title: string; createdAt: string; signature: string };
+export type ProductMaterials = ProductDocumentContent & { briefId: string; title: string; createdAt: string; signature: string; drawingDigest?: string; textRecord?: TextRecord };
 export type RevisionQuestion = { id: string; question: string; options: string[] };
 export type RevisionDialogue = {
   briefId: string; intent: string; summary: string; questions: RevisionQuestion[]; signature: string;
@@ -82,8 +94,11 @@ export type ProductWorkflow = {
   version: 2; sourceFingerprint: string; selection: ProductSelection; review?: ProductReview;
   brief?: ProductBrief; previews?: ProductPreview; cad?: ProductCad; confirmation?: PreviewConfirmation;
   materials?: ProductMaterials; figures: Record<string, ProductImage>; revision?: RevisionDialogue;
+  textStructure?: TextStructure; textDraft?: TextDraft;
   previous?: ProductWorkflow;
   generation?: ProductGenerationStatus;
+  tokenUsage?: TokenUsage[];
+  tokenUsageIncomplete?: boolean;
   /** 旧版单张三视图预览；仅为保留历史数据，不能用于确认或生成成品。 */
   preview?: ProductImage;
   redrawCount: number; updatedAt: string;
@@ -101,12 +116,13 @@ const signed = (value: Record<string, unknown>) => typeof value.signature === 's
 const timestamp = (value: unknown) => productText(value, 40) && Number.isFinite(Date.parse(value));
 export function isProductSelection(value: unknown): value is ProductSelection {
   if (!object(value)) return false;
-  return productText(value.company, 100) && productText(value.business, 1000) && productText(value.product, 200) &&
+  return productText(value.company, 100, true) && productText(value.business, 1000) && productText(value.product, 200) &&
     productText(value.proposedName, 100) && ['utility', 'invention'].includes(String(value.patentType)) &&
     productText(value.improvementType, 100, true) && productText(value.visualPreferences, 6000, true) &&
     Array.isArray(value.choices) && value.choices.length > 0 && value.choices.length <= 80 &&
     value.choices.every(item => object(item) && productText(item.id, 80) && /^[a-zA-Z0-9_-]+$/.test(item.id) && productText(item.category, 80) && productText(item.text, 3000)) &&
-    unique(value.choices.map(item => item.id as string));
+    unique(value.choices.map(item => item.id as string)) &&
+    (value.selectedProblem === undefined || (isProblemSelection(value.selectedProblem) && value.selectedProblem.product === value.product));
 }
 export function isChoiceChanges(value: unknown, selection: ProductSelection): value is ChoiceChanges {
   if (!object(value)) return false;
@@ -167,7 +183,8 @@ export function isProductDesign(value: unknown, selection: ProductSelection): va
   if (!object(value) || !productText(value.title, 100) || value.title !== selection.proposedName ||
     !['technicalField', 'useCase', 'overview', 'appearance', 'workingPrinciple', 'innovation'].every(key => productText(value[key], 10000)) || !texts(value.assumptions)) return false;
   if (!Array.isArray(value.components) || value.components.length < 1 || value.components.length > 12 ||
-    !value.components.every((part, index) => object(part) && part.number === String(index + 1) && productText(part.name, 80) && ['structure', 'connection', 'purpose'].every(key => productText(part[key], 3000))) ||
+    !value.components.every(part => object(part) && typeof part.number === 'string' && /^[1-9]\d{0,2}$/.test(part.number) && productText(part.name, 80) && ['structure', 'connection', 'purpose'].every(key => productText(part[key], 3000))) ||
+    !unique(value.components.map(part => part.number as string)) ||
     !unique(value.components.map(part => part.name as string))) return false;
   return Array.isArray(value.choiceCoverage) && value.choiceCoverage.length === selection.choices.length &&
     value.choiceCoverage.every(item => object(item) && productText(item.choiceId, 80) && selection.choices.some(choice => choice.id === item.choiceId) && productText(item.description, 2000)) &&
@@ -185,6 +202,7 @@ export function renderProductDescription(design: ProductDesign): string {
 }
 export function isProductBrief(value: unknown): value is ProductBrief {
   return object(value) && productText(value.id, 80) && productText(value.reviewId, 80) && timestamp(value.createdAt) && signed(value) &&
+    (value.technicalSource === undefined || (isFrozenTechnicalSource(value.technicalSource) && object(value.design) && value.technicalSource.plan.title === value.design.title)) &&
     isProductSelection(value.selection) && isProductDesign(value.design, value.selection) && value.description === renderProductDescription(value.design);
 }
 export function imageReference(image: ProductImageRef): ProductImageRef {
@@ -225,18 +243,24 @@ export function hasCompletePreviewViews(preview: ProductPreview | undefined, bri
 const cadViews = new Set<string>(CAD_VIEWS.map(item => item.id));
 const point3 = (value: unknown): value is [number, number, number] => Array.isArray(value) && value.length === 3 && value.every(item => typeof item === 'number' && Number.isFinite(item) && Math.abs(item) <= 1e6);
 export function isCadLabels(value: unknown): value is CadLabel[] {
-  return Array.isArray(value) && value.length <= 12 && value.every(item => object(item) && productText(item.number, 4) && /^\d{1,3}$/.test(String(item.number)) && productText(item.name, 80) && point3(item.point)) &&
+  return Array.isArray(value) && value.length <= 30 && value.every(item => object(item) && productText(item.number, 4) && /^\d{1,3}$/.test(String(item.number)) && productText(item.name, 80) && point3(item.point)) &&
     unique(value.map(item => String((item as CadLabel).number)));
 }
 export function isProductCad(value: unknown): value is ProductCad {
   if (!object(value) || !productText(value.id, 80) || !productText(value.briefId, 80) || !timestamp(value.createdAt) || !signed(value)) return false;
   if (!productText(value.script, 30000) || !productText(value.summary, 4000) || !texts(value.assumptions, 20, 2000) || !productText(value.freecadVersion, 200)) return false;
   if (!isCadLabels(value.labels)) return false;
+  if (value.generationModel !== undefined && !productText(value.generationModel, 200)) return false;
+  if (value.visualReview !== undefined && (!object(value.visualReview) || value.visualReview.status !== 'passed' || !productText(value.visualReview.summary, 4000) || !texts(value.visualReview.figureIds, 8, 40))) return false;
+  if (value.drawingVersion !== undefined && (value.drawingVersion !== 1 || drawingPlanErrors(value.drawingPlan).length)) return false;
   if (value.keyStructure !== undefined && !(object(value.keyStructure) && point3(value.keyStructure.point) && typeof value.keyStructure.radius === 'number' && value.keyStructure.radius >= 0.1 && value.keyStructure.radius <= 5000)) return false;
   if (typeof value.meshDigest !== 'string' || !/^[a-f0-9]{64}$/.test(value.meshDigest)) return false;
   if (!Number.isSafeInteger(value.vertexCount) || (value.vertexCount as number) < 3 || !Number.isSafeInteger(value.triangleCount) || (value.triangleCount as number) < 1) return false;
-  if (!Array.isArray(value.views) || value.views.length < 1 || value.views.length > CAD_VIEWS.length) return false;
-  return value.views.every(view => object(view) && cadViews.has(String(view.view)) && CAD_VIEWS.some(item => item.id === view.view && item.title === view.title) &&
+  if (!Array.isArray(value.views) || value.views.length < 1 || value.views.length > 8) return false;
+  return value.views.every(view => object(view) && (value.drawingVersion === 1 ? /^figure-[1-8]$/.test(String(view.view)) && productText(view.title, 100) : cadViews.has(String(view.view)) && CAD_VIEWS.some(item => item.id === view.view && item.title === view.title)) &&
+    (value.drawingVersion !== 1 || (Array.isArray(view.annotations) && view.annotations.length > 0 && view.annotations.length <= 30 &&
+      view.annotations.every(a => object(a) && typeof a.number === 'string' && /^[1-9]\d{0,2}$/.test(a.number) && typeof a.owner === 'string' && /^[1-9]\d{0,2}$/.test(a.owner) &&
+        [a.anchor, a.position].every(v => Array.isArray(v) && v.length === 2 && v.every(n => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 6000))))) &&
     productText(view.svg, 600000) && String(view.svg).startsWith('<svg') && String(view.svg).trimEnd().endsWith('</svg>') &&
     Number.isSafeInteger(view.width) && (view.width as number) >= 100 && (view.width as number) <= 6000 &&
     Number.isSafeInteger(view.height) && (view.height as number) >= 100 && (view.height as number) <= 6000 &&
@@ -251,7 +275,14 @@ export function isProductDocumentContent(value: unknown): value is ProductDocume
     texts(value.claims, 20, 6000) && value.claims.length > 0 && value.claims.every((claim, index) => new RegExp(`^${index + 1}[.．、]`).test(claim.trim()));
 }
 export function isProductMaterials(value: unknown): value is ProductMaterials {
-  return object(value) && productText(value.briefId, 80) && productText(value.title, 100) && timestamp(value.createdAt) && signed(value) && isProductDocumentContent(value);
+  if (!object(value) || !productText(value.briefId, 80) || !productText(value.title, 100) || !timestamp(value.createdAt) || !signed(value)) return false;
+  const record = value;
+  const hasContent = isProductDocumentContent(value);
+  if (!hasContent) return false;
+  if (record.textRecord === undefined) return true;
+  if (!isTextRecord(record.textRecord)) return false;
+  const content = documentContent(record.textRecord.document);
+  return record.title === record.textRecord.document.title && Object.entries(content).every(([key, entry]) => JSON.stringify(record[key]) === JSON.stringify(entry));
 }
 export function isRevisionQuestions(value: unknown): value is RevisionQuestion[] {
   return Array.isArray(value) && value.length >= 1 && value.length <= 4 &&
@@ -263,31 +294,40 @@ export function isRevisionDialogue(value: unknown): value is RevisionDialogue {
 export function namingFingerprint(project: Project): string {
   const naming = project.naming;
   return JSON.stringify({ category: project.category, name: naming?.selectedName || project.name, profile: naming?.profile,
-    evidence: naming?.structureSelection?.options.filter(option => naming.structureSelection!.selectedIds.includes(option.id)) });
+    evidence: naming?.structureSelection?.options.filter(option => naming.structureSelection!.selectedIds.includes(option.id)),
+    selectedProblem: naming?.problemSelection });
 }
 export function selectionFromProject(project: Project): ProductSelection {
   const profile = project.naming?.profile;
   const selection = project.naming?.structureSelection;
+  const selectedProblem = project.naming?.problemSelection;
   const features = profile?.features.split('、').map(text => text.trim()).filter(Boolean) || [];
   return { company: profile?.company.trim() || project.owner, business: profile?.business.trim() || project.name,
-    product: profile?.product.trim() || project.name, proposedName: project.name,
+    product: profile?.product.trim() || project.baseProductName || project.name, proposedName: project.naming?.selectedName || project.name,
     patentType: project.category === 'invention' ? 'invention' : 'utility', improvementType: profile?.improvementType || '', visualPreferences: '',
-    choices: [ ...features.map((text, index) => ({ id: `feature-${index + 1}`, category: '结构特征', text })),
+    ...(selectedProblem ? { selectedProblem: structuredClone(selectedProblem) } : {}),
+    choices: [ ...(selectedProblem ? [
+      { id: 'selected-problem', category: '技术问题', text: selectedProblem.problem.problem },
+      ...(selectedProblem.context ? [{ id: 'user-context', category: '用户已有描述', text: selectedProblem.context }] : []),
+    ] : features.map((text, index) => ({ id: `feature-${index + 1}`, category: '结构特征', text }))),
       ...(selection?.options.filter(option => selection.selectedIds.includes(option.id)).map((option, index) => ({ id: `evidence-${index + 1}`, category: option.category, text: `${option.label}：${option.detail}；${option.technicalMeaning}` })) || []),
     ], };
 }
 export function createProductWorkflow(project: Project): ProductWorkflow {
-  return { version: 2, sourceFingerprint: namingFingerprint(project), selection: selectionFromProject(project), figures: {}, redrawCount: 0, updatedAt: new Date().toISOString() };
+  return { version: 2, sourceFingerprint: namingFingerprint(project), selection: selectionFromProject(project), figures: {}, tokenUsage: [], redrawCount: 0, updatedAt: new Date().toISOString() };
 }
 export function isProductWorkflow(value: unknown): value is ProductWorkflow {
   if (!object(value) || value.version !== 2 || !productText(value.sourceFingerprint, 200000) || !isProductSelection(value.selection) || !timestamp(value.updatedAt) ||
     !Number.isSafeInteger(value.redrawCount) || (value.redrawCount as number) < 0 || !object(value.figures) || Object.keys(value.figures).length > 12) return false;
   return (value.generation === undefined || isProductGenerationStatus(value.generation)) &&
+    (value.tokenUsage === undefined || (Array.isArray(value.tokenUsage) && value.tokenUsage.every(isTokenUsage))) &&
+    (value.tokenUsageIncomplete === undefined || typeof value.tokenUsageIncomplete === 'boolean') &&
     (value.review === undefined || isProductReview(value.review)) && (value.brief === undefined || isProductBrief(value.brief)) &&
     (value.previews === undefined || isProductPreview(value.previews)) && (value.cad === undefined || isProductCad(value.cad)) &&
     (value.preview === undefined || isProductImage(value.preview)) &&
     (value.confirmation === undefined || isPreviewConfirmation(value.confirmation)) &&
     (value.materials === undefined || isProductMaterials(value.materials)) && Object.values(value.figures).every(isProductImage) &&
+    (value.textStructure === undefined || isTextStructure(value.textStructure)) && (value.textDraft === undefined || isTextDraft(value.textDraft)) &&
     (value.revision === undefined || isRevisionDialogue(value.revision)) &&
     (value.previous === undefined || (object(value.previous) && value.previous.previous === undefined && isProductWorkflow(value.previous)));
 }
@@ -308,7 +348,8 @@ export function hasCurrentConfirmation(workflow: ProductWorkflow): boolean {
 }
 /** 由 FreeCAD 统一模型投影出的附图与当前简介同版本。 */
 export function hasCurrentCad(workflow: ProductWorkflow): boolean {
-  return !!workflow.brief && workflow.cad?.briefId === workflow.brief.id && workflow.cad.views.length >= 1;
+  return !!workflow.brief && workflow.cad?.briefId === workflow.brief.id && workflow.cad.views.length >= 1 &&
+    (workflow.cad.drawingVersion !== 1 || drawingCoverageErrors(workflow.cad, workflow.brief).length === 0);
 }
 export function hasCurrentImageFigures(workflow: ProductWorkflow, templateIds: string[]): boolean {
   return !!workflow.brief && templateIds.every(id => workflow.figures[id]?.briefId === workflow.brief!.id &&
@@ -316,10 +357,20 @@ export function hasCurrentImageFigures(workflow: ProductWorkflow, templateIds: s
 }
 export function isProductWorkflowComplete(workflow: ProductWorkflow, templateIds: string[] = PATENT_FIGURE_TEMPLATES.map(template => template.id)): boolean {
   return hasCurrentConfirmation(workflow) && workflow.materials?.briefId === workflow.brief!.id && workflow.materials.title === workflow.brief!.design.title &&
+    hasCurrentText(workflow) &&
+    (workflow.cad?.drawingVersion === 1
+      ? workflow.cad.visualReview?.status === 'passed' && workflow.materials.drawingDigest === drawingManifestDigest(workflow.cad)
+      : !workflow.materials.drawingDigest) &&
     (hasCurrentCad(workflow) || hasCurrentImageFigures(workflow, templateIds));
+}
+export function hasCurrentText(workflow: ProductWorkflow): boolean {
+  const source = workflow.brief?.technicalSource, materials = workflow.materials;
+  if (!materials || materials.briefId !== workflow.brief?.id) return false;
+  if (!source) return true; // Historical tasks retain their original reading/export behavior.
+  return materials.textRecord?.sourceVersion === source.version && !checkTextDocument(materials.textRecord.document, source.plan).length;
 }
 export function productDocumentText(workflow: ProductWorkflow): string {
   if (!isProductWorkflowComplete(workflow)) throw new Error('请先确认当前彩色预览，并完成申请文案和黑白附图。');
   const content = workflow.materials!;
-  return `${content.title}\n专利申请材料初稿\n\n说明书摘要\n${content.abstract}\n\n权利要求书\n${content.claims.join('\n\n')}\n\n技术领域\n${content.technicalField}\n\n背景技术\n${content.background}\n\n内容\n${content.content}\n\n附图说明\n${content.drawings}\n\n具体实施方式\n${content.embodiment}\n\n产品简介\n${workflow.brief!.description}`;
+  return `${content.title}\n专利申请材料初稿\n\n说明书摘要\n${content.abstract}\n\n权利要求书\n${content.claims.join('\n\n')}\n\n技术领域\n${content.technicalField}\n\n背景技术\n${content.background}\n\n内容\n${content.content}\n\n附图说明\n${content.drawings}\n\n具体实施方式\n${content.embodiment}`;
 }

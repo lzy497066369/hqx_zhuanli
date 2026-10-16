@@ -19,7 +19,16 @@ test('real MySQL storage: CRUD, images, revisions, isolation, validation and res
   try {
     assert.equal((await request('health')).status, 200);
     assert.deepEqual((await request('projects')).data, { revision: 0, initialized: false, projects: [] });
-    const project = { id: 'test-project', name: "中文名称 ' ; DROP TABLE projects; --", category: 'utility', owner: '企业', description: '结构资料', status: 'draft', updatedAt: new Date().toISOString(), productWorkflow: { preview: 'data:image/png;base64,' + 'A'.repeat(5 * 1024 * 1024) } };
+    assert.deepEqual((await request('companies')).data, { revision: 0, initialized: false, companies: [] });
+    const company = { id: 'company-test', name: '测试企业', mainProducts: ['闸门', '屏幕'], updatedAt: new Date().toISOString() };
+    assert.equal((await request('companies', 'PUT', { companies: [company], revision: 0 })).status, 200);
+    assert.deepEqual((await request('companies')).data.companies, [company]);
+    assert.equal((await request('companies', 'PUT', { companies: [], revision: 0 })).status, 409);
+    assert.equal((await request('companies', 'PUT', { companies: [company, company], revision: 1 })).status, 400);
+    assert.equal((await request('companies', 'PUT', { companies: [company, { ...company, id: 'other', name: ' 测试企业 ' }], revision: 1 })).status, 400);
+    assert.equal((await request('companies', 'PUT', { companies: [{ ...company, mainProducts: ['屏'.repeat(101)] }], revision: 1 })).status, 400);
+    assert.equal((await request('companies', 'PUT', { companies: [], revision: 1 }, { Origin: 'https://attacker.example' })).status, 403);
+    const project = { id: 'test-project', name: "中文名称 ' ; DROP TABLE projects; --", category: 'utility', owner: '企业', baseProductName: '闸门', filingStatus: 'in_progress', description: '结构资料', status: 'draft', updatedAt: new Date().toISOString(), productWorkflow: { preview: 'data:image/png;base64,' + 'A'.repeat(5 * 1024 * 1024) } };
     assert.equal((await request('projects', 'PUT', { projects: [project], revision: 0 })).status, 200);
     const loaded = await request('projects');
     assert.equal(loaded.status, 200);
@@ -27,6 +36,8 @@ test('real MySQL storage: CRUD, images, revisions, isolation, validation and res
     assert.equal((await request('projects', 'PUT', { projects: [], revision: 0 })).status, 409);
     assert.equal((await request('projects', 'PUT', { projects: [project, project], revision: 1 })).status, 400);
     assert.equal((await request('projects', 'PUT', { projects: [{ ...project, category: 'invalid' }], revision: 1 })).status, 400);
+    assert.equal((await request('projects', 'PUT', { projects: [{ ...project, filingStatus: 'invalid' }], revision: 1 })).status, 400);
+    assert.equal((await request('projects', 'PUT', { projects: [{ ...project, baseProductName: '闸'.repeat(101) }], revision: 1 })).status, 400);
     const draft = { version: 1, profile: { company: '企业', business: '', product: '', features: '', excludedTerms: '' }, candidates: [], selectedName: '', confirmed: false };
     assert.equal((await request('naming-drafts/test-project', 'PUT', { draft, revision: 0 })).status, 200);
     assert.deepEqual((await request('naming-drafts/test-project')).data.draft, draft);
@@ -42,6 +53,13 @@ test('real MySQL storage: CRUD, images, revisions, isolation, validation and res
     assert.equal((await request('projects', 'PUT', { projects: [], revision: 1 }, { Origin: 'https://attacker.example' })).status, 403);
     await storage.close();
     storage = createStorageMiddleware(config); current = storage;
+    assert.deepEqual((await request('companies')).data.companies, [company]);
+    const renamedCompany = { ...company, name: '已改名企业' };
+    assert.equal((await request('companies', 'PUT', { companies: [renamedCompany], revision: 1 })).status, 200);
+    assert.deepEqual((await request('companies')).data.companies, [renamedCompany]);
+    assert.equal((await request('companies', 'PUT', { companies: [], revision: 2 })).status, 200);
+    assert.equal((await request('projects')).data.projects.length, 1);
+    assert.deepEqual((await request('companies')).data, { companies: [], revision: 3, initialized: true });
     assert.equal((await request('projects')).data.projects[0].name, project.name);
     const concurrency = await Promise.all([request('projects', 'PUT', { projects: [{ ...project, name: '版本 A' }], revision: 1 }), request('projects', 'PUT', { projects: [{ ...project, name: '版本 B' }], revision: 1 })]);
     assert.deepEqual(concurrency.map(result => result.status).sort(), [200, 409]);
@@ -54,6 +72,7 @@ test('real MySQL storage: CRUD, images, revisions, isolation, validation and res
     current = isolated;
     try {
       assert.deepEqual((await request('projects')).data.projects, []);
+      assert.deepEqual((await request('companies')).data, { companies: [], revision: 0, initialized: false });
       await isolated.database.pool.execute('DELETE FROM workspaces WHERE id = ?', [isolated.database.workspace]);
     } finally { await isolated.close(); current = storage; }
     const broken = createStorageMiddleware({ ...config, port: 1 });
